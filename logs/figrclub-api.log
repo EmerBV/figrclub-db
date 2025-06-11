@@ -1,0 +1,259 @@
+2025-06-11 13:26:41 [main] WARN  o.s.b.t.j.DuplicateJsonObjectContextCustomizerFactory$DuplicateJsonObjectContextCustomizer - 
+
+Found multiple occurrences of org.json.JSONObject on the class path:
+
+	jar:file:/Users/emer/.m2/repository/com/vaadin/external/google/android-json/0.0.20131108.vaadin1/android-json-0.0.20131108.vaadin1.jar!/org/json/JSONObject.class
+	jar:file:/Users/emer/.m2/repository/org/json/json/20220320/json-20220320.jar!/org/json/JSONObject.class
+
+You may wish to exclude one of them to ensure predictable runtime behavior
+
+2025-06-11 13:26:41 [main] INFO  c.f.f.FigrclubDbApplicationTests - Starting FigrclubDbApplicationTests using Java 23.0.2 with PID 47238 (started by emer in /Users/emer/Desktop/DEV_20/Java/figrclub-db)
+2025-06-11 13:26:41 [main] DEBUG c.f.f.FigrclubDbApplicationTests - Running with Spring Boot v3.5.0, Spring v6.2.7
+2025-06-11 13:26:41 [main] INFO  c.f.f.FigrclubDbApplicationTests - The following 1 profile is active: "dev"
+2025-06-11 13:26:42 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2025-06-11 13:26:42 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 14 ms. Found 3 JPA repository interfaces.
+2025-06-11 13:26:42 [main] INFO  o.h.jpa.internal.util.LogHelper - HHH000204: Processing PersistenceUnitInfo [name: default]
+2025-06-11 13:26:42 [main] INFO  org.hibernate.Version - HHH000412: Hibernate ORM core version 6.6.15.Final
+2025-06-11 13:26:42 [main] INFO  o.h.c.i.RegionFactoryInitiator - HHH000026: Second-level cache disabled
+2025-06-11 13:26:42 [main] INFO  o.s.o.j.p.SpringPersistenceUnitInfo - No LoadTimeWeaver setup: ignoring JPA class transformer
+2025-06-11 13:26:42 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2025-06-11 13:26:42 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@46fdfaeb
+2025-06-11 13:26:42 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2025-06-11 13:26:42 [main] WARN  org.hibernate.orm.deprecation - HHH90000025: MySQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2025-06-11 13:26:42 [main] INFO  o.hibernate.orm.connections.pooling - HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-1)']
+	Database driver: undefined/unknown
+	Database version: 9.2
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2025-06-11 13:26:42 [main] INFO  o.h.e.t.j.p.i.JtaPlatformInitiator - HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    create table password_reset_tokens (
+        id bigint not null auto_increment,
+        created_at datetime(6) not null,
+        expires_at datetime(6) not null,
+        token varchar(255) not null,
+        used bit not null,
+        user_id bigint not null,
+        primary key (id)
+    ) engine=InnoDB
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    create table role (
+        id bigint not null auto_increment,
+        name varchar(255),
+        primary key (id)
+    ) engine=InnoDB
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    create table user_roles (
+        user_id bigint not null,
+        role_id bigint not null
+    ) engine=InnoDB
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    create table users (
+        id bigint not null auto_increment,
+        created_at datetime(6) not null,
+        created_by varchar(255),
+        updated_at datetime(6),
+        updated_by varchar(255),
+        email varchar(100) not null,
+        first_name varchar(50) not null,
+        is_account_non_expired bit not null,
+        is_account_non_locked bit not null,
+        is_credentials_non_expired bit not null,
+        is_enabled bit not null,
+        last_name varchar(50) not null,
+        password varchar(255) not null,
+        primary key (id)
+    ) engine=InnoDB
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    create index idx_token 
+       on password_reset_tokens (token)
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    create index idx_user_id 
+       on password_reset_tokens (user_id)
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    create index idx_expires_at 
+       on password_reset_tokens (expires_at)
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    alter table password_reset_tokens 
+       drop index UK71lqwbwtklmljk3qlsugr1mig
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    alter table password_reset_tokens 
+       add constraint UK71lqwbwtklmljk3qlsugr1mig unique (token)
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    create index idx_user_email 
+       on users (email)
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    alter table users 
+       drop index UK6dotkott2kjsp8vw4d0m25fb7
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    alter table users 
+       add constraint UK6dotkott2kjsp8vw4d0m25fb7 unique (email)
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    alter table password_reset_tokens 
+       add constraint FKk3ndxg5xp6v7wd4gjyusp15gq 
+       foreign key (user_id) 
+       references users (id)
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    alter table user_roles 
+       add constraint FKrhfovtciq1l558cw6udg0h0d3 
+       foreign key (role_id) 
+       references role (id)
+2025-06-11 13:26:43 [main] DEBUG org.hibernate.SQL - 
+    alter table user_roles 
+       add constraint FKhfh9dx7w3ubf1co1vdev94g3f 
+       foreign key (user_id) 
+       references users (id)
+2025-06-11 13:26:43 [main] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Initialized JPA EntityManagerFactory for persistence unit 'default'
+2025-06-11 13:26:43 [main] INFO  o.s.d.j.r.query.QueryEnhancerFactory - Hibernate is in classpath; If applicable, HQL parser will be used.
+2025-06-11 13:26:43 [main] INFO  o.s.s.c.a.a.c.InitializeAuthenticationProviderBeanManagerConfigurer$InitializeAuthenticationProviderManagerConfigurer - Global AuthenticationManager configured with AuthenticationProvider bean with name daoAuthenticationProvider
+2025-06-11 13:26:43 [main] WARN  o.s.s.c.a.a.c.InitializeUserDetailsBeanManagerConfigurer$InitializeUserDetailsManagerConfigurer - Global AuthenticationManager configured with an AuthenticationProvider bean. UserDetailsService beans will not be used by Spring Security for automatically configuring username/password login. Consider removing the AuthenticationProvider bean. Alternatively, consider using the UserDetailsService in a manually instantiated DaoAuthenticationProvider. If the current configuration is intentional, to turn off this warning, increase the logging level of 'org.springframework.security.config.annotation.authentication.configuration.InitializeUserDetailsBeanManagerConfigurer' to ERROR
+2025-06-11 13:26:43 [main] WARN  o.s.b.a.o.j.JpaBaseConfiguration$JpaWebConfiguration - spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
+2025-06-11 13:26:44 [main] INFO  o.s.b.a.e.web.EndpointLinksResolver - Exposing 3 endpoints beneath base path '/actuator'
+2025-06-11 13:26:44 [main] WARN  o.s.b.a.t.ThymeleafAutoConfiguration$DefaultTemplateResolverConfiguration - Cannot find template location: classpath:/templates/ (please add some templates, check your Thymeleaf configuration, or set spring.thymeleaf.check-template-location=false)
+2025-06-11 13:26:44 [main] INFO  c.f.f.FigrclubDbApplicationTests - Started FigrclubDbApplicationTests in 2.635 seconds (process running for 2.981)
+2025-06-11 13:26:44 [main] DEBUG org.hibernate.SQL - 
+    /* <criteria> */ select
+        r1_0.id,
+        r1_0.name 
+    from
+        role r1_0 
+    where
+        r1_0.name=?
+2025-06-11 13:26:44 [main] DEBUG org.hibernate.SQL - 
+    /* insert for
+        com.figrclub.figrclubdb.domain.model.Role */insert 
+    into
+        role (name) 
+    values
+        (?)
+2025-06-11 13:26:44 [main] INFO  c.f.figrclubdb.data.DataInitializer - Created role: ROLE_USER
+2025-06-11 13:26:44 [main] DEBUG org.hibernate.SQL - 
+    /* <criteria> */ select
+        r1_0.id,
+        r1_0.name 
+    from
+        role r1_0 
+    where
+        r1_0.name=?
+2025-06-11 13:26:44 [main] DEBUG org.hibernate.SQL - 
+    /* insert for
+        com.figrclub.figrclubdb.domain.model.Role */insert 
+    into
+        role (name) 
+    values
+        (?)
+2025-06-11 13:26:44 [main] INFO  c.f.figrclubdb.data.DataInitializer - Created role: ROLE_ADMIN
+2025-06-11 13:26:44 [main] INFO  c.f.figrclubdb.data.DataInitializer - Data initialization completed successfully
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset request for email: john.doe@example.com
+2025-06-11 13:26:44 [main] WARN  c.f.f.s.password.PasswordService - Too many active reset tokens for user: john.doe@example.com
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset confirmation with token
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Processing password change request
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Password changed successfully for user: john.doe@example.com
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset request for email: nonexistent@example.com
+2025-06-11 13:26:44 [main] WARN  c.f.f.s.password.PasswordService - Password reset requested for non-existent email: nonexistent@example.com
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset confirmation with token
+2025-06-11 13:26:44 [main] WARN  c.f.f.s.password.PasswordService - Attempt to use invalid/expired token: expiredToken
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Processing password change request
+2025-06-11 13:26:44 [main] WARN  c.f.f.s.password.PasswordService - Invalid current password for user: john.doe@example.com
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Processing password change request
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset request for email: john.doe@example.com
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Password reset token generated for user: john.doe@example.com
+2025-06-11 13:26:44 [main] DEBUG c.f.f.s.password.PasswordService - Reset token will expire at: 2025-06-12T13:26:44.771287
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Starting cleanup of expired password reset tokens
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Expired password reset tokens cleaned up successfully
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Processing password change request
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset confirmation with token
+2025-06-11 13:26:44 [main] INFO  c.f.f.s.password.PasswordService - Password reset completed successfully for user: john.doe@example.com
+2025-06-11 13:26:44 [SpringApplicationShutdownHook] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Closing JPA EntityManagerFactory for persistence unit 'default'
+2025-06-11 13:26:44 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2025-06-11 13:26:44 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2025-06-11 13:29:15 [main] WARN  o.s.b.t.j.DuplicateJsonObjectContextCustomizerFactory$DuplicateJsonObjectContextCustomizer - 
+
+Found multiple occurrences of org.json.JSONObject on the class path:
+
+	jar:file:/Users/emer/.m2/repository/com/vaadin/external/google/android-json/0.0.20131108.vaadin1/android-json-0.0.20131108.vaadin1.jar!/org/json/JSONObject.class
+	jar:file:/Users/emer/.m2/repository/org/json/json/20220320/json-20220320.jar!/org/json/JSONObject.class
+
+You may wish to exclude one of them to ensure predictable runtime behavior
+
+2025-06-11 13:29:15 [main] INFO  c.f.f.FigrclubDbApplicationTests - Starting FigrclubDbApplicationTests using Java 23.0.2 with PID 47973 (started by emer in /Users/emer/Desktop/DEV_20/Java/figrclub-db)
+2025-06-11 13:29:15 [main] DEBUG c.f.f.FigrclubDbApplicationTests - Running with Spring Boot v3.5.0, Spring v6.2.7
+2025-06-11 13:29:15 [main] INFO  c.f.f.FigrclubDbApplicationTests - The following 1 profile is active: "dev"
+2025-06-11 13:29:15 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2025-06-11 13:29:15 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 15 ms. Found 3 JPA repository interfaces.
+2025-06-11 13:29:15 [main] INFO  o.h.jpa.internal.util.LogHelper - HHH000204: Processing PersistenceUnitInfo [name: default]
+2025-06-11 13:29:15 [main] INFO  org.hibernate.Version - HHH000412: Hibernate ORM core version 6.6.15.Final
+2025-06-11 13:29:15 [main] INFO  o.h.c.i.RegionFactoryInitiator - HHH000026: Second-level cache disabled
+2025-06-11 13:29:15 [main] INFO  o.s.o.j.p.SpringPersistenceUnitInfo - No LoadTimeWeaver setup: ignoring JPA class transformer
+2025-06-11 13:29:15 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2025-06-11 13:29:15 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@5213b887
+2025-06-11 13:29:15 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2025-06-11 13:29:15 [main] WARN  org.hibernate.orm.deprecation - HHH90000025: MySQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2025-06-11 13:29:15 [main] INFO  o.hibernate.orm.connections.pooling - HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-1)']
+	Database driver: undefined/unknown
+	Database version: 9.2
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2025-06-11 13:29:16 [main] INFO  o.h.e.t.j.p.i.JtaPlatformInitiator - HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2025-06-11 13:29:16 [main] DEBUG org.hibernate.SQL - 
+    alter table users 
+       drop index UKq4gvg4dl2a3fpetfwspodde8e
+2025-06-11 13:29:16 [main] DEBUG org.hibernate.SQL - 
+    alter table users 
+       add constraint UKq4gvg4dl2a3fpetfwspodde8e unique (email)
+2025-06-11 13:29:16 [main] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Initialized JPA EntityManagerFactory for persistence unit 'default'
+2025-06-11 13:29:16 [main] INFO  o.s.d.j.r.query.QueryEnhancerFactory - Hibernate is in classpath; If applicable, HQL parser will be used.
+2025-06-11 13:29:16 [main] INFO  o.s.s.c.a.a.c.InitializeAuthenticationProviderBeanManagerConfigurer$InitializeAuthenticationProviderManagerConfigurer - Global AuthenticationManager configured with AuthenticationProvider bean with name daoAuthenticationProvider
+2025-06-11 13:29:16 [main] WARN  o.s.s.c.a.a.c.InitializeUserDetailsBeanManagerConfigurer$InitializeUserDetailsManagerConfigurer - Global AuthenticationManager configured with an AuthenticationProvider bean. UserDetailsService beans will not be used by Spring Security for automatically configuring username/password login. Consider removing the AuthenticationProvider bean. Alternatively, consider using the UserDetailsService in a manually instantiated DaoAuthenticationProvider. If the current configuration is intentional, to turn off this warning, increase the logging level of 'org.springframework.security.config.annotation.authentication.configuration.InitializeUserDetailsBeanManagerConfigurer' to ERROR
+2025-06-11 13:29:17 [main] WARN  o.s.b.a.o.j.JpaBaseConfiguration$JpaWebConfiguration - spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
+2025-06-11 13:29:17 [main] INFO  o.s.b.a.e.web.EndpointLinksResolver - Exposing 3 endpoints beneath base path '/actuator'
+2025-06-11 13:29:17 [main] WARN  o.s.b.a.t.ThymeleafAutoConfiguration$DefaultTemplateResolverConfiguration - Cannot find template location: classpath:/templates/ (please add some templates, check your Thymeleaf configuration, or set spring.thymeleaf.check-template-location=false)
+2025-06-11 13:29:17 [main] INFO  c.f.f.FigrclubDbApplicationTests - Started FigrclubDbApplicationTests in 2.559 seconds (process running for 2.901)
+2025-06-11 13:29:17 [main] DEBUG org.hibernate.SQL - 
+    /* <criteria> */ select
+        r1_0.id,
+        r1_0.name 
+    from
+        role r1_0 
+    where
+        r1_0.name=?
+2025-06-11 13:29:17 [main] DEBUG c.f.figrclubdb.data.DataInitializer - Role already exists: ROLE_USER
+2025-06-11 13:29:17 [main] DEBUG org.hibernate.SQL - 
+    /* <criteria> */ select
+        r1_0.id,
+        r1_0.name 
+    from
+        role r1_0 
+    where
+        r1_0.name=?
+2025-06-11 13:29:17 [main] DEBUG c.f.figrclubdb.data.DataInitializer - Role already exists: ROLE_ADMIN
+2025-06-11 13:29:17 [main] INFO  c.f.figrclubdb.data.DataInitializer - Data initialization completed successfully
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset request for email: john.doe@example.com
+2025-06-11 13:29:17 [main] WARN  c.f.f.s.password.PasswordService - Too many active reset tokens for user: john.doe@example.com
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset confirmation with token
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Processing password change request
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Password changed successfully for user: john.doe@example.com
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset request for email: nonexistent@example.com
+2025-06-11 13:29:17 [main] WARN  c.f.f.s.password.PasswordService - Password reset requested for non-existent email: nonexistent@example.com
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset confirmation with token
+2025-06-11 13:29:17 [main] WARN  c.f.f.s.password.PasswordService - Attempt to use invalid/expired token: expiredToken
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Processing password change request
+2025-06-11 13:29:17 [main] WARN  c.f.f.s.password.PasswordService - Invalid current password for user: john.doe@example.com
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Processing password change request
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset request for email: john.doe@example.com
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Password reset token generated for user: john.doe@example.com
+2025-06-11 13:29:17 [main] DEBUG c.f.f.s.password.PasswordService - Reset token will expire at: 2025-06-12T13:29:17.962806
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Starting cleanup of expired password reset tokens
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Expired password reset tokens cleaned up successfully
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Processing password change request
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Processing password reset confirmation with token
+2025-06-11 13:29:17 [main] INFO  c.f.f.s.password.PasswordService - Password reset completed successfully for user: john.doe@example.com
+2025-06-11 13:29:17 [SpringApplicationShutdownHook] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Closing JPA EntityManagerFactory for persistence unit 'default'
+2025-06-11 13:29:17 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2025-06-11 13:29:17 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.

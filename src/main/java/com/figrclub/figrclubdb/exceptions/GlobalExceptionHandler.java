@@ -69,6 +69,4 @@ public class GlobalExceptionHandler {
                 .body(new ApiResponse("An unexpected error occurred", null));
     }
 
-
-
 }

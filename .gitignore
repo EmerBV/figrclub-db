@@ -32,9 +32,50 @@ build/
 ### VS Code ###
 .vscode/
 
+# ===================================================================
+# LOGS Y ARCHIVOS TEMPORALES (NO COMMITEAR)
+# ===================================================================
+
+# Directorio de logs completo
+logs/
+log/
+
+# Archivos de log individuales
+*.log
+*.log.*
+*.out
+
+# Logs específicos
+application.log*
+figrclub-api.log*
+spring.log*
+nohup.out
+*.pid
+
+# ===================================================================
+# CONFIGURACIÓN SENSIBLE (NO COMMITEAR)
+# ===================================================================
+
+# Archivos de configuración con credenciales
 .env
+.env.local
+.env.prod
+.env.staging
+.env.development
+.env.test
+.env.*.local
 src/main/resources/application.properties
 src/main/resources/application-dev.properties
 src/main/resources/application-test.properties
 src/main/resources/application-prod.properties
 src/main/resources/application-staging.properties
+
+# ===================================================================
+# ARCHIVOS TEMPORALES
+# ===================================================================
+*.tmp
+*.temp
+*.bak
+*.backup
+.DS_Store
+Thumbs.db

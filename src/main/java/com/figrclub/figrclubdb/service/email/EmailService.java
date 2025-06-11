@@ -12,7 +12,9 @@ import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
 import jakarta.mail.MessagingException;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
+import java.io.UnsupportedEncodingException;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -36,30 +38,26 @@ public class EmailService {
     @Value("${app.frontend.url:http://localhost:3000}")
     private String frontendUrl;
 
+    @Value("${app.mail.enabled:true}")
+    private boolean mailEnabled;
+
     /**
      * Envía email de verificación de forma asíncrona
      */
-    @Async
+    @Async("emailTaskExecutor")
     public CompletableFuture<Boolean> sendVerificationEmail(String toEmail, String userName, String token) {
         try {
             log.info("Preparing verification email for user: {}", toEmail);
 
-            Context context = new Context();
-            context.setVariable("userName", userName);
-            context.setVariable("verificationUrl", frontendUrl + "/verify-email?token=" + token);
-            context.setVariable("frontendUrl", frontendUrl);
-            context.setVariable("companyName", "FigrClub");
+            if (!mailEnabled) {
+                log.info("Mail sending is disabled. Skipping email to: {}", toEmail);
+                return CompletableFuture.completedFuture(true); // Simular éxito en modo desarrollo
+            }
 
-            String htmlContent = buildSimpleEmailTemplate(
-                    "Verifica tu cuenta en FigrClub",
-                    "Hola " + userName + ",",
-                    "Para completar tu registro, por favor verifica tu email haciendo clic en el botón:",
-                    "Verificar Email",
-                    frontendUrl + "/verify-email?token=" + token,
-                    "Si no creaste esta cuenta, puedes ignorar este email."
-            );
+            String subject = "Verifica tu cuenta - FigrClub";
+            String htmlContent = buildVerificationEmailContent(userName, token);
 
-            boolean sent = sendEmail(toEmail, "Verifica tu cuenta - FigrClub", htmlContent);
+            boolean sent = sendEmail(toEmail, subject, htmlContent);
 
             if (sent) {
                 log.info("Verification email sent successfully to: {}", toEmail);
@@ -78,21 +76,20 @@ public class EmailService {
     /**
      * Envía email de confirmación cuando la verificación es exitosa
      */
-    @Async
+    @Async("emailTaskExecutor")
     public CompletableFuture<Boolean> sendWelcomeEmail(String toEmail, String userName) {
         try {
             log.info("Sending welcome email to: {}", toEmail);
 
-            String htmlContent = buildSimpleEmailTemplate(
-                    "¡Bienvenido a FigrClub!",
-                    "¡Hola " + userName + "!",
-                    "Tu cuenta ha sido verificada exitosamente. Ya puedes comenzar a usar FigrClub.",
-                    "Acceder a FigrClub",
-                    frontendUrl + "/login",
-                    "Gracias por unirte a nuestra comunidad."
-            );
+            if (!mailEnabled) {
+                log.info("Mail sending is disabled. Skipping welcome email to: {}", toEmail);
+                return CompletableFuture.completedFuture(true);
+            }
 
-            boolean sent = sendEmail(toEmail, "¡Bienvenido a FigrClub!", htmlContent);
+            String subject = "¡Bienvenido a FigrClub!";
+            String htmlContent = buildWelcomeEmailContent(userName);
+
+            boolean sent = sendEmail(toEmail, subject, htmlContent);
 
             if (sent) {
                 log.info("Welcome email sent successfully to: {}", toEmail);
@@ -109,30 +106,79 @@ public class EmailService {
     }
 
     /**
-     * Método privado para enviar emails
+     * Método privado mejorado para enviar emails con mejor manejo de errores
      */
     private boolean sendEmail(String to, String subject, String htmlContent) {
         try {
             MimeMessage mimeMessage = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
 
-            helper.setFrom(fromEmail, fromName);
+            // CORRECCIÓN: Usar InternetAddress para manejar el nombre del remitente
+            try {
+                InternetAddress fromAddress = new InternetAddress(fromEmail, fromName, "UTF-8");
+                helper.setFrom(fromAddress);
+            } catch (UnsupportedEncodingException e) {
+                log.warn("Error setting sender name, using email only: {}", e.getMessage());
+                helper.setFrom(fromEmail); // Fallback a solo email
+            }
+
             helper.setTo(to);
             helper.setSubject(subject);
             helper.setText(htmlContent, true);
 
+            // Agregar headers adicionales para mejorar la entrega
+            mimeMessage.setHeader("Message-ID", generateMessageId());
+            mimeMessage.setHeader("X-Mailer", "FigrClub-Application");
+
             mailSender.send(mimeMessage);
             return true;
 
-        } catch (MessagingException | MailException e) {
-            log.error("Error sending email to {}: {}", to, e.getMessage(), e);
+        } catch (MessagingException e) {
+            log.error("MessagingException sending email to {}: {}", to, e.getMessage(), e);
+            return false;
+        } catch (MailException e) {
+            log.error("MailException sending email to {}: {}", to, e.getMessage(), e);
+            return false;
+        } catch (Exception e) {
+            log.error("Unexpected error sending email to {}: {}", to, e.getMessage(), e);
             return false;
         }
     }
 
     /**
-     * Construye un template simple de email sin usar Thymeleaf
-     * Para casos donde no se tiene configurado Thymeleaf o se prefiere simplicidad
+     * Construye el contenido del email de verificación
+     */
+    private String buildVerificationEmailContent(String userName, String token) {
+        String verificationUrl = frontendUrl + "/verify-email?token=" + token;
+
+        return buildSimpleEmailTemplate(
+                "Verifica tu cuenta en FigrClub",
+                "¡Hola " + userName + "!",
+                "Para completar tu registro, por favor verifica tu email haciendo clic en el botón:",
+                "Verificar Email",
+                verificationUrl,
+                "Si no creaste esta cuenta, puedes ignorar este email."
+        );
+    }
+
+    /**
+     * Construye el contenido del email de bienvenida
+     */
+    private String buildWelcomeEmailContent(String userName) {
+        String loginUrl = frontendUrl + "/login";
+
+        return buildSimpleEmailTemplate(
+                "¡Bienvenido a FigrClub!",
+                "¡Hola " + userName + "!",
+                "Tu cuenta ha sido verificada exitosamente. Ya puedes comenzar a usar FigrClub.",
+                "Acceder a FigrClub",
+                loginUrl,
+                "Gracias por unirte a nuestra comunidad."
+        );
+    }
+
+    /**
+     * Construye un template simple de email
      */
     private String buildSimpleEmailTemplate(String title, String greeting, String message,
                                             String buttonText, String buttonUrl, String footer) {
@@ -144,55 +190,84 @@ public class EmailService {
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
                     <title>%s</title>
                     <style>
+                        * {
+                            margin: 0;
+                            padding: 0;
+                            box-sizing: border-box;
+                        }
                         body { 
-                            font-family: Arial, sans-serif; 
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
                             line-height: 1.6; 
                             color: #333; 
-                            max-width: 600px; 
-                            margin: 0 auto; 
-                            padding: 20px; 
-                            background-color: #f4f4f4;
+                            background-color: #f5f5f5;
+                            padding: 20px;
                         }
                         .email-container {
+                            max-width: 600px;
+                            margin: 0 auto;
                             background-color: white;
-                            padding: 30px;
-                            border-radius: 10px;
-                            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                            padding: 40px;
+                            border-radius: 12px;
+                            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
                         }
                         .header { 
                             text-align: center; 
-                            margin-bottom: 30px; 
+                            margin-bottom: 40px; 
                             color: #2c3e50;
                         }
                         .header h1 {
                             margin: 0;
-                            font-size: 24px;
+                            font-size: 28px;
+                            font-weight: 600;
+                            color: #3498db;
                         }
                         .content { 
-                            margin-bottom: 30px; 
+                            margin-bottom: 40px; 
+                            text-align: center;
+                        }
+                        .content p {
+                            margin-bottom: 20px;
+                            font-size: 16px;
+                            line-height: 1.6;
                         }
                         .button {
                             display: inline-block;
-                            padding: 12px 30px;
-                            background-color: #3498db;
+                            padding: 16px 32px;
+                            background: linear-gradient(135deg, #3498db, #2980b9);
                             color: white;
                             text-decoration: none;
-                            border-radius: 5px;
-                            font-weight: bold;
-                            margin: 20px 0;
+                            border-radius: 8px;
+                            font-weight: 600;
+                            font-size: 16px;
+                            margin: 30px 0;
+                            transition: all 0.3s ease;
+                            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
                         }
                         .button:hover {
-                            background-color: #2980b9;
+                            background: linear-gradient(135deg, #2980b9, #2471a3);
+                            box-shadow: 0 6px 20px rgba(52, 152, 219, 0.4);
                         }
                         .footer {
-                            margin-top: 30px;
-                            padding-top: 20px;
+                            margin-top: 40px;
+                            padding-top: 30px;
                             border-top: 1px solid #eee;
                             font-size: 14px;
                             color: #666;
                             text-align: center;
+                            line-height: 1.5;
                         }
-                        .center { text-align: center; }
+                        .footer p {
+                            margin-bottom: 10px;
+                        }
+                        .footer .url {
+                            word-break: break-all;
+                            color: #3498db;
+                            font-size: 12px;
+                        }
+                        .brand {
+                            color: #3498db;
+                            font-weight: 600;
+                        }
                     </style>
                 </head>
                 <body>
@@ -205,18 +280,51 @@ public class EmailService {
                             <p><strong>%s</strong></p>
                             <p>%s</p>
                             
-                            <div class="center">
-                                <a href="%s" class="button">%s</a>
-                            </div>
+                            <a href="%s" class="button">%s</a>
                         </div>
                         
                         <div class="footer">
                             <p>%s</p>
-                            <p><small>Este email fue enviado por FigrClub. Si tienes problemas con el botón, copia y pega esta URL en tu navegador: %s</small></p>
+                            <p>Si tienes problemas con el botón, copia y pega esta URL en tu navegador:</p>
+                            <p class="url">%s</p>
+                            <br>
+                            <p><small>Este email fue enviado por <span class="brand">FigrClub</span></small></p>
                         </div>
                     </div>
                 </body>
                 </html>
                 """.formatted(title, title, greeting, message, buttonUrl, buttonText, footer, buttonUrl);
+    }
+
+    /**
+     * Genera un Message-ID único para cada email
+     */
+    private String generateMessageId() {
+        return "<" + System.currentTimeMillis() + "." +
+                java.util.UUID.randomUUID().toString() + "@figrclub.com>";
+    }
+
+    /**
+     * Método para verificar la configuración de mail
+     */
+    public boolean isMailConfigured() {
+        try {
+            if (!mailEnabled) {
+                return false;
+            }
+            // Intentar crear un mensaje básico para verificar configuración
+            MimeMessage testMessage = mailSender.createMimeMessage();
+            return testMessage != null;
+        } catch (Exception e) {
+            log.error("Mail configuration test failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Método para envío síncrono (para casos especiales)
+     */
+    public boolean sendEmailSync(String to, String subject, String htmlContent) {
+        return sendEmail(to, subject, htmlContent);
     }
 }

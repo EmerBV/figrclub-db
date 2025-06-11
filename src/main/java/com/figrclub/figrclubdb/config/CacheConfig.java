@@ -10,7 +10,12 @@ public class CacheConfig {
 
     @Bean
     public CacheManager cacheManager() {
-        ConcurrentMapCacheManager cacheManager = new ConcurrentMapCacheManager("users", "roles");
+        ConcurrentMapCacheManager cacheManager = new ConcurrentMapCacheManager(
+                "users",
+                "roles",
+                "rate-limit-info",
+                "login-attempts"
+        );
         cacheManager.setAllowNullValues(false);
         return cacheManager;
     }

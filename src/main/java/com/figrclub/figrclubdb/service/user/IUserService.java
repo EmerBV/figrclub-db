@@ -10,15 +10,18 @@ import org.springframework.data.domain.Pageable;
 import java.util.Optional;
 
 /**
- * Interface del servicio de usuarios con soporte para verificación de email
+ * Interface del servicio de usuarios con soporte completo para verificación de email
+ * y gestión de usuarios
  */
 public interface IUserService {
+
+    // ===== MÉTODOS DE BÚSQUEDA =====
 
     /**
      * Encuentra un usuario por su ID
      * @param userId ID del usuario
      * @return Usuario encontrado
-     * //@throws ResourceNotFoundException si no se encuentra el usuario
+     * @throws com.figrclub.figrclubdb.exceptions.ResourceNotFoundException si no se encuentra el usuario
      */
     User getUserById(Long userId);
 
@@ -28,6 +31,23 @@ public interface IUserService {
      * @return Optional con el usuario si existe
      */
     Optional<User> findByEmail(String email);
+
+    /**
+     * Verifica si existe un usuario con el email dado
+     * @param email Email a verificar
+     * @return true si existe, false si no
+     */
+    boolean existsByEmail(String email);
+
+    /**
+     * Busca usuarios por nombre o email
+     * @param searchTerm Término de búsqueda
+     * @param pageable Información de paginación
+     * @return Página de usuarios que coinciden con el término
+     */
+    Page<User> searchUsers(String searchTerm, Pageable pageable);
+
+    // ===== MÉTODOS DE LISTADO CON PAGINACIÓN =====
 
     /**
      * Encuentra todos los usuarios con paginación
@@ -57,6 +77,8 @@ public interface IUserService {
      */
     Page<User> findUnverifiedUsers(Pageable pageable);
 
+    // ===== MÉTODOS DE CONVERSIÓN Y DTO =====
+
     /**
      * Convierte un usuario a DTO
      * @param user Usuario a convertir
@@ -77,11 +99,13 @@ public interface IUserService {
      */
     User getAuthenticatedUser();
 
+    // ===== MÉTODOS DE CREACIÓN =====
+
     /**
      * Crea un nuevo usuario con rol USER (deshabilitado por defecto)
      * @param request Datos del usuario a crear
      * @return Usuario creado
-     * //@throws AlreadyExistsException si el email ya existe
+     * @throws com.figrclub.figrclubdb.exceptions.AlreadyExistsException si el email ya existe
      */
     User createUser(CreateUserRequest request);
 
@@ -89,7 +113,7 @@ public interface IUserService {
      * Crea un nuevo usuario con rol ADMIN (deshabilitado por defecto)
      * @param request Datos del usuario a crear
      * @return Usuario creado
-     * //@throws AlreadyExistsException si el email ya existe
+     * @throws com.figrclub.figrclubdb.exceptions.AlreadyExistsException si el email ya existe
      */
     User createAdminUser(CreateUserRequest request);
 
@@ -97,25 +121,29 @@ public interface IUserService {
      * Crea un nuevo usuario pre-verificado (solo uso administrativo)
      * @param request Datos del usuario a crear
      * @return Usuario creado y verificado
-     * //@throws AlreadyExistsException si el email ya existe
+     * @throws com.figrclub.figrclubdb.exceptions.AlreadyExistsException si el email ya existe
      */
     User createVerifiedUser(CreateUserRequest request);
+
+    // ===== MÉTODOS DE ACTUALIZACIÓN =====
 
     /**
      * Actualiza un usuario existente
      * @param request Datos a actualizar
      * @param userId ID del usuario
      * @return Usuario actualizado
-     * //@throws ResourceNotFoundException si no se encuentra el usuario
+     * @throws com.figrclub.figrclubdb.exceptions.ResourceNotFoundException si no se encuentra el usuario
      */
     User updateUser(UserUpdateRequest request, Long userId);
 
     /**
      * Elimina un usuario por su ID
      * @param userId ID del usuario a eliminar
-     * //@throws ResourceNotFoundException si no se encuentra el usuario
+     * @throws com.figrclub.figrclubdb.exceptions.ResourceNotFoundException si no se encuentra el usuario
      */
     void deleteUser(Long userId);
+
+    // ===== MÉTODOS DE VERIFICACIÓN DE EMAIL =====
 
     /**
      * Verifica el email de un usuario
@@ -123,6 +151,15 @@ public interface IUserService {
      * @return Usuario con email verificado
      */
     User verifyUserEmail(User user);
+
+    /**
+     * Verifica si un email está verificado
+     * @param email Email a verificar
+     * @return true si está verificado, false si no
+     */
+    boolean isEmailVerified(String email);
+
+    // ===== MÉTODOS DE ACTIVACIÓN/DESACTIVACIÓN =====
 
     /**
      * Deshabilita un usuario (uso administrativo)
@@ -139,11 +176,20 @@ public interface IUserService {
     User enableUser(Long userId);
 
     /**
-     * Verifica si un email está verificado
-     * @param email Email a verificar
-     * @return true si está verificado, false si no
+     * Desactiva un usuario (alias para disableUser para compatibilidad)
+     * @param userId ID del usuario
+     * @return Usuario desactivado
      */
-    boolean isEmailVerified(String email);
+    User deactivateUser(Long userId);
+
+    /**
+     * Activa un usuario (alias para enableUser para compatibilidad)
+     * @param userId ID del usuario
+     * @return Usuario activado
+     */
+    User activateUser(Long userId);
+
+    // ===== MÉTODOS DE ESTADÍSTICAS =====
 
     /**
      * Obtiene estadísticas de usuarios

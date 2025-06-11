@@ -56,6 +56,13 @@ public class UserService implements IUserService {
 
     @Override
     @Transactional(readOnly = true)
+    public boolean existsByEmail(String email) {
+        log.debug("Checking if user exists by email: {}", email);
+        return userRepository.existsByEmail(email);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Page<User> findAllUsers(Pageable pageable) {
         log.debug("Finding all users with pagination: {}", pageable);
         return userRepository.findAll(pageable);
@@ -86,7 +93,31 @@ public class UserService implements IUserService {
     @Transactional(readOnly = true)
     public UserDto convertUserToDto(User user) {
         log.debug("Converting user to DTO: {}", user.getId());
-        return modelMapper.map(user, UserDto.class);
+
+        // Usar ModelMapper para el mapeo básico
+        UserDto userDto = modelMapper.map(user, UserDto.class);
+
+        // Mapear campos adicionales manualmente
+        userDto.setFullName(user.getFullName());
+        userDto.setAdmin(user.isAdmin());
+
+        // Mapear campos de estado correctamente
+        userDto.setEnabled(user.isEnabled());
+        userDto.setAccountNonExpired(user.isAccountNonExpired());
+        userDto.setAccountNonLocked(user.isAccountNonLocked());
+        userDto.setCredentialsNonExpired(user.isCredentialsNonExpired());
+
+        // Mapear fecha de verificación de email
+        userDto.setEmailVerifiedAt(user.getEmailVerifiedAt());
+
+        // Mapear roles como lista de strings
+        if (user.getRoles() != null && !user.getRoles().isEmpty()) {
+            userDto.setRoles(user.getRoles().stream()
+                    .map(Role::getName)
+                    .toList());
+        }
+
+        return userDto;
     }
 
     @Override
@@ -105,7 +136,11 @@ public class UserService implements IUserService {
         }
 
         String email = authentication.getName();
-        return userRepository.findByEmail(email);
+        User user = userRepository.findByEmail(email);
+        if (user == null) {
+            throw new ResourceNotFoundException("Authenticated user not found: " + email);
+        }
+        return user;
     }
 
     /**
@@ -256,6 +291,28 @@ public class UserService implements IUserService {
     }
 
     /**
+     * Desactiva un usuario (alias para disableUser para compatibilidad)
+     */
+    @Override
+    @Transactional
+    @CacheEvict(value = "users", key = "#userId")
+    public User deactivateUser(Long userId) {
+        log.info("Deactivating user with ID: {}", userId);
+        return disableUser(userId);
+    }
+
+    /**
+     * Activa un usuario (alias para enableUser para compatibilidad)
+     */
+    @Override
+    @Transactional
+    @CacheEvict(value = "users", key = "#userId")
+    public User activateUser(Long userId) {
+        log.info("Activating user with ID: {}", userId);
+        return enableUser(userId);
+    }
+
+    /**
      * Verifica si un email está verificado
      */
     @Override
@@ -282,4 +339,23 @@ public class UserService implements IUserService {
      * Record para estadísticas de usuarios
      */
     public record UserStats(long totalUsers, long verifiedUsers, long unverifiedUsers) {}
+
+    /**
+     * Busca usuarios por nombre o email
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public Page<User> searchUsers(String searchTerm, Pageable pageable) {
+        log.debug("Searching users with term: {}", searchTerm);
+
+        // Verificar que el término de búsqueda no esté vacío
+        if (searchTerm == null || searchTerm.trim().isEmpty()) {
+            throw new IllegalArgumentException("Search term cannot be empty");
+        }
+
+        String cleanSearchTerm = searchTerm.trim();
+
+        // Usar el método del repositorio que ya existe
+        return userRepository.findByNameContainingIgnoreCase(cleanSearchTerm, pageable);
+    }
 }

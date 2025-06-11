@@ -13,6 +13,8 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -22,6 +24,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -33,6 +36,7 @@ import static org.springframework.http.HttpStatus.*;
 @RestController
 @RequestMapping("${api.prefix}/users")
 @Tag(name = "User Management", description = "Operations related to user management")
+@Validated
 @Slf4j
 public class UserController {
 
@@ -53,6 +57,10 @@ public class UserController {
         } catch (ResourceNotFoundException e) {
             log.warn("User not found with ID: {}", userId);
             return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
+        } catch (Exception e) {
+            log.error("Error fetching user with ID: {}", userId, e);
+            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error retrieving user", null));
         }
     }
 
@@ -108,6 +116,10 @@ public class UserController {
             return ResponseEntity.ok(new ApiResponse("Current user retrieved successfully", userDto));
         } catch (ResourceNotFoundException e) {
             return ResponseEntity.status(UNAUTHORIZED).body(new ApiResponse(e.getMessage(), null));
+        } catch (Exception e) {
+            log.error("Error getting current user", e);
+            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error retrieving current user", null));
         }
     }
 
@@ -193,8 +205,9 @@ public class UserController {
     public ResponseEntity<ApiResponse> deactivateUser(@PathVariable Long userId) {
         try {
             log.info("Deactivating user with ID: {}", userId);
-            userService.deactivateUser(userId);
-            return ResponseEntity.ok(new ApiResponse("User deactivated successfully!", null));
+            User user = userService.deactivateUser(userId);
+            UserDto userDto = userService.convertUserToDto(user);
+            return ResponseEntity.ok(new ApiResponse("User deactivated successfully!", userDto));
         } catch (ResourceNotFoundException e) {
             log.warn("Attempt to deactivate non-existent user: {}", userId);
             return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
@@ -211,8 +224,9 @@ public class UserController {
     public ResponseEntity<ApiResponse> activateUser(@PathVariable Long userId) {
         try {
             log.info("Activating user with ID: {}", userId);
-            userService.activateUser(userId);
-            return ResponseEntity.ok(new ApiResponse("User activated successfully!", null));
+            User user = userService.activateUser(userId);
+            UserDto userDto = userService.convertUserToDto(user);
+            return ResponseEntity.ok(new ApiResponse("User activated successfully!", userDto));
         } catch (ResourceNotFoundException e) {
             log.warn("Attempt to activate non-existent user: {}", userId);
             return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
@@ -224,18 +238,122 @@ public class UserController {
 
     @GetMapping("/check-email")
     @Operation(summary = "Check email availability", description = "Check if an email is already registered")
-    public ResponseEntity<ApiResponse> checkEmailAvailability(@RequestParam String email) {
+    public ResponseEntity<ApiResponse> checkEmailAvailability(
+            @Parameter(description = "Email to check", required = true)
+            @RequestParam @Email(message = "Email should be valid")
+            @NotBlank(message = "Email is required") String email) {
         try {
+            log.debug("Checking email availability for: {}", email);
             boolean exists = userService.existsByEmail(email);
+
             Map<String, Object> response = new HashMap<>();
             response.put("email", email);
             response.put("available", !exists);
+            response.put("exists", exists);
 
-            return ResponseEntity.ok(new ApiResponse("Email availability checked", response));
+            String message = exists ? "Email is already registered" : "Email is available";
+            return ResponseEntity.ok(new ApiResponse(message, response));
         } catch (Exception e) {
-            log.error("Error checking email availability", e);
+            log.error("Error checking email availability for: {}", email, e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR)
                     .body(new ApiResponse("Error checking email availability", null));
+        }
+    }
+
+    @GetMapping("/stats")
+    @Operation(summary = "Get user statistics", description = "Get user statistics (Admin only)")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> getUserStats() {
+        try {
+            log.info("Retrieving user statistics");
+            var stats = userService.getUserStats();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("totalUsers", stats.totalUsers());
+            response.put("verifiedUsers", stats.verifiedUsers());
+            response.put("unverifiedUsers", stats.unverifiedUsers());
+            response.put("verificationRate", stats.totalUsers() > 0 ?
+                    (double) stats.verifiedUsers() / stats.totalUsers() * 100 : 0.0);
+
+            return ResponseEntity.ok(new ApiResponse("User statistics retrieved successfully", response));
+        } catch (Exception e) {
+            log.error("Error retrieving user statistics", e);
+            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error retrieving user statistics", null));
+        }
+    }
+
+    @GetMapping("/search")
+    @Operation(summary = "Search users", description = "Search users by name or email (Admin only)")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> searchUsers(
+            @Parameter(description = "Search term")
+            @RequestParam @NotBlank(message = "Search term is required") String searchTerm,
+            @Parameter(description = "Page number (0-based)")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size")
+            @RequestParam(defaultValue = "10") int size) {
+        try {
+            log.info("Searching users with term: {}", searchTerm);
+
+            Pageable pageable = PageRequest.of(page, size, Sort.by("firstName", "lastName"));
+            Page<User> usersPage = userService.searchUsers(searchTerm, pageable);
+            Page<UserDto> userDtoPage = usersPage.map(userService::convertUserToDto);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("users", userDtoPage.getContent());
+            response.put("currentPage", userDtoPage.getNumber());
+            response.put("totalItems", userDtoPage.getTotalElements());
+            response.put("totalPages", userDtoPage.getTotalPages());
+            response.put("pageSize", userDtoPage.getSize());
+            response.put("searchTerm", searchTerm);
+
+            return ResponseEntity.ok(new ApiResponse("Search completed successfully", response));
+        } catch (Exception e) {
+            log.error("Error searching users with term: {}", searchTerm, e);
+            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error searching users", null));
+        }
+    }
+
+    @GetMapping("/export")
+    @Operation(summary = "Export users", description = "Export user list (Admin only)")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> exportUsers(
+            @Parameter(description = "Export format (csv, json)")
+            @RequestParam(defaultValue = "json") String format,
+            @Parameter(description = "Include only active users")
+            @RequestParam(defaultValue = "true") boolean activeOnly) {
+        try {
+            log.info("Exporting users in format: {}, activeOnly: {}", format, activeOnly);
+
+            // Para simplificar, devolvemos la información en JSON
+            // En una implementación real, podrías generar archivos CSV, Excel, etc.
+
+            Pageable pageable = PageRequest.of(0, 1000, Sort.by("firstName", "lastName"));
+            Page<User> usersPage = activeOnly
+                    ? userService.findActiveUsers(pageable)
+                    : userService.findAllUsers(pageable);
+
+            var userDtos = usersPage.getContent().stream()
+                    .map(userService::convertUserToDto)
+                    .toList();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("users", userDtos);
+            response.put("totalCount", usersPage.getTotalElements());
+            response.put("exportFormat", format);
+            response.put("exportedAt", java.time.LocalDateTime.now());
+            response.put("activeOnly", activeOnly);
+
+            return ResponseEntity.ok(new ApiResponse("Users exported successfully", response));
+        } catch (Exception e) {
+            log.error("Error exporting users in format: {}", format, e);
+            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error exporting users", null));
         }
     }
 }

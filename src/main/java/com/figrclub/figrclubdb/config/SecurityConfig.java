@@ -4,7 +4,6 @@ import com.figrclub.figrclubdb.security.jwt.AuthTokenFilter;
 import com.figrclub.figrclubdb.security.jwt.JwtAuthEntryPoint;
 import com.figrclub.figrclubdb.security.user.AppUserDetailsService;
 import lombok.RequiredArgsConstructor;
-import org.modelmapper.ModelMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.lang.NonNull;
@@ -30,12 +29,13 @@ import java.util.List;
 @Configuration
 @EnableMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
+
     private final AppUserDetailsService userDetailsService;
     private final JwtAuthEntryPoint authEntryPoint;
 
     private static final List<String> SECURED_URLS = List.of(
-            "/figrclub/api/v1/carts/**",
-            "/figrclub/api/v1/cartItems/**"
+            "/api/v1/users/**",
+            "/api/v1/admin/**"
     );
 
     private static final String[] PUBLIC_URLS = {
@@ -44,13 +44,10 @@ public class SecurityConfig {
             "/actuator/health",
             "/v3/api-docs/**",
             "/swagger-ui/**",
-            "/swagger-ui.html"
+            "/swagger-ui.html",
+            "/swagger-resources/**",
+            "/webjars/**"
     };
-
-    @Bean
-    public ModelMapper modelMapper() {
-        return new ModelMapper();
-    }
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -64,7 +61,7 @@ public class SecurityConfig {
 
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
-        return  authConfig.getAuthenticationManager();
+        return authConfig.getAuthenticationManager();
     }
 
     @Bean
@@ -75,34 +72,21 @@ public class SecurityConfig {
         return authProvider;
     }
 
-    /*
-    @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-
-        http.csrf(AbstractHttpConfigurer::disable)
-                .exceptionHandling(exception -> exception.authenticationEntryPoint(authEntryPoint))
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.requestMatchers(SECURED_URLS.toArray(String[]::new)).authenticated()
-                        .anyRequest().permitAll());
-        http.authenticationProvider(daoAuthenticationProvider());
-        http.addFilterBefore(authTokenFilter(), UsernamePasswordAuthenticationFilter.class);
-        return http.build();
-    }
-     */
-
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(authEntryPoint))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth ->
-                        auth.requestMatchers("/figrclub/api/v1/auth/**").permitAll()
-                                .requestMatchers("/figrclub/api/v1/users/admin/**").hasRole("ADMIN")
+                        auth.requestMatchers(PUBLIC_URLS).permitAll()
+                                .requestMatchers("/api/v1/users/admin/**").hasRole("ADMIN")
                                 .requestMatchers(SECURED_URLS.toArray(String[]::new)).authenticated()
                                 .anyRequest().permitAll()
                 );
+
         http.authenticationProvider(daoAuthenticationProvider());
         http.addFilterBefore(authTokenFilter(), UsernamePasswordAuthenticationFilter.class);
+
         return http.build();
     }
 
@@ -112,11 +96,12 @@ public class SecurityConfig {
             @Override
             public void addCorsMappings(@NonNull CorsRegistry registry) {
                 registry.addMapping("/**")
-                        .allowedOrigins("http://localhost:5173", "https://your-production-domain.com")
-                        .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                        .allowedOrigins("http://localhost:3000", "http://localhost:5173", "https://your-production-domain.com")
+                        .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")
                         .allowedHeaders("*")
                         .exposedHeaders("Authorization", "Content-Type", "X-Apple-Pay-Session")
-                        .allowCredentials(true);
+                        .allowCredentials(true)
+                        .maxAge(3600);
             }
         };
     }

@@ -18,10 +18,14 @@ import java.util.stream.Collectors;
 @AllArgsConstructor
 @NoArgsConstructor
 public class AppUserDetails implements UserDetails {
+
     private Long id;
     private String email;
     private String password;
-
+    private boolean isEnabled;
+    private boolean isAccountNonExpired;
+    private boolean isAccountNonLocked;
+    private boolean isCredentialsNonExpired;
     private Collection<GrantedAuthority> authorities;
 
     public static AppUserDetails buildUserDetails(User user) {
@@ -34,7 +38,12 @@ public class AppUserDetails implements UserDetails {
                 user.getId(),
                 user.getEmail(),
                 user.getPassword(),
-                authorities);
+                user.isEnabled(),
+                user.isAccountNonExpired(),
+                user.isAccountNonLocked(),
+                user.isCredentialsNonExpired(),
+                authorities
+        );
     }
 
     @Override
@@ -54,21 +63,21 @@ public class AppUserDetails implements UserDetails {
 
     @Override
     public boolean isAccountNonExpired() {
-        return UserDetails.super.isAccountNonExpired();
+        return isAccountNonExpired;
     }
 
     @Override
     public boolean isAccountNonLocked() {
-        return UserDetails.super.isAccountNonLocked();
+        return isAccountNonLocked;
     }
 
     @Override
     public boolean isCredentialsNonExpired() {
-        return UserDetails.super.isCredentialsNonExpired();
+        return isCredentialsNonExpired;
     }
 
     @Override
     public boolean isEnabled() {
-        return UserDetails.super.isEnabled();
+        return isEnabled;
     }
 }

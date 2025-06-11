@@ -49,5 +49,9 @@ public class User extends Auditable {
         this.email = email;
         this.password = password;
     }
+
+    public String getFullName() {
+        return firstName + " " + lastName;
+    }
 }
 

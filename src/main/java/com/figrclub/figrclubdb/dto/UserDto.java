@@ -2,11 +2,16 @@ package com.figrclub.figrclubdb.dto;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * DTO para representar un usuario en las respuestas de la API
+ * Versión limpia sin métodos duplicados con Lombok
+ */
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class UserDto {
@@ -23,7 +28,7 @@ public class UserDto {
     private boolean accountNonLocked;
     private boolean credentialsNonExpired;
 
-    // Campo de administrador - CORREGIDO
+    // Campo de administrador
     private boolean admin;
 
     // Lista de roles
@@ -44,30 +49,27 @@ public class UserDto {
     private LocalDateTime emailVerifiedAt;
 
     // Campos adicionales para estadísticas
-    private long totalUsers; // Para estadísticas en respuestas de admin
+    private Long totalUsers; // Para estadísticas en respuestas de admin
 
-    // Métodos de conveniencia
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public boolean isAccountNonExpired() {
-        return accountNonExpired;
-    }
-
-    public boolean isAccountNonLocked() {
-        return accountNonLocked;
-    }
-
-    public boolean isCredentialsNonExpired() {
-        return credentialsNonExpired;
-    }
-
-    public boolean isAdmin() {
-        return admin;
-    }
-
+    // Método adicional para verificación de email (NO duplica Lombok)
+    @JsonProperty("emailVerified")
     public boolean isEmailVerified() {
         return emailVerifiedAt != null;
+    }
+
+    // Método adicional para estado de cuenta (NO duplica Lombok)
+    @JsonProperty("accountStatus")
+    public String getAccountStatus() {
+        if (!enabled) {
+            return "PENDING_VERIFICATION";
+        } else if (!accountNonLocked) {
+            return "LOCKED";
+        } else if (!accountNonExpired) {
+            return "EXPIRED";
+        } else if (!credentialsNonExpired) {
+            return "CREDENTIALS_EXPIRED";
+        } else {
+            return "ACTIVE";
+        }
     }
 }

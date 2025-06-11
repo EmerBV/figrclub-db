@@ -8,41 +8,122 @@ import com.figrclub.figrclubdb.response.JwtResponse;
 import com.figrclub.figrclubdb.security.jwt.JwtUtils;
 import com.figrclub.figrclubdb.security.user.AppUserDetails;
 import com.figrclub.figrclubdb.service.user.IUserService;
+import com.figrclub.figrclubdb.service.email.EmailVerificationService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.concurrent.CompletableFuture;
+
+/**
+ * Controlador de autenticación con verificación de email integrada
+ */
 @RestController
 @RequestMapping("${api.prefix}/auth")
 @RequiredArgsConstructor
+@Slf4j
+@Tag(name = "Authentication", description = "Endpoints de autenticación y registro")
 public class AuthController {
 
     private final IUserService userService;
     private final AuthenticationManager authenticationManager;
     private final JwtUtils jwtUtils;
+    private final EmailVerificationService emailVerificationService;
 
+    /**
+     * Registro de usuario con verificación de email automática
+     */
     @PostMapping("/register")
+    @Operation(
+            summary = "Registrar usuario",
+            description = "Registra un nuevo usuario y envía email de verificación automáticamente"
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Usuario registrado exitosamente"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Error en los datos de registro"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Email ya existe")
+    })
     public ResponseEntity<ApiResponse> register(@Valid @RequestBody CreateUserRequest request) {
         try {
+            log.info("User registration attempt for email: {}", request.getEmail());
+
+            // Crear usuario (inicialmente deshabilitado para verificación)
             User user = userService.createUser(request);
+
+            // Enviar email de verificación automáticamente
+            CompletableFuture<Boolean> emailSent = emailVerificationService.generateAndSendVerificationToken(user);
+
+            // Preparar respuesta
+            String message = "Usuario registrado exitosamente. ";
+
+            try {
+                Boolean sent = emailSent.get(); // Esperar resultado del email
+                if (sent) {
+                    message += "Se ha enviado un email de verificación a " + user.getEmail();
+                } else {
+                    message += "Error al enviar email de verificación. Puedes solicitar un reenvío.";
+                    log.warn("Failed to send verification email for user: {}", user.getEmail());
+                }
+            } catch (Exception e) {
+                message += "Error al enviar email de verificación. Puedes solicitar un reenvío.";
+                log.error("Error waiting for email result for user {}: {}", user.getEmail(), e.getMessage());
+            }
+
+            RegisterResponse response = new RegisterResponse(
+                    user.getId(),
+                    user.getEmail(),
+                    user.getFirstName() + " " + user.getLastName(),
+                    user.isEnabled()
+            );
+
             return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(new ApiResponse("User registered successfully!", user.getId()));
+                    .body(new ApiResponse(message, response));
+
         } catch (Exception e) {
+            log.error("Registration failed for email {}: {}", request.getEmail(), e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(new ApiResponse("Registration failed: " + e.getMessage(), null));
+                    .body(new ApiResponse("Registro fallido: " + e.getMessage(), null));
         }
     }
 
+    /**
+     * Login con verificación de estado de verificación de email
+     */
     @PostMapping("/login")
+    @Operation(
+            summary = "Iniciar sesión",
+            description = "Autentica usuario. Requiere email verificado para acceso completo."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Login exitoso"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Credenciales inválidas"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Email no verificado"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "423", description = "Cuenta bloqueada")
+    })
     public ResponseEntity<ApiResponse> login(@Valid @RequestBody LoginRequest request) {
         try {
+            log.info("Login attempt for email: {}", request.getEmail());
+
+            // Verificar si el email está verificado antes de autenticar
+            if (!emailVerificationService.isEmailVerified(request.getEmail())) {
+                log.warn("Login attempt with unverified email: {}", request.getEmail());
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(new ApiResponse("Email no verificado. Por favor verifica tu email antes de continuar.",
+                                new UnverifiedEmailResponse(request.getEmail())));
+            }
+
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
             );
@@ -52,17 +133,105 @@ public class AuthController {
             AppUserDetails userDetails = (AppUserDetails) authentication.getPrincipal();
 
             JwtResponse jwtResponse = new JwtResponse(userDetails.getId(), jwt);
-            return ResponseEntity.ok(new ApiResponse("Login successful!", jwtResponse));
+
+            log.info("Successful login for user: {}", request.getEmail());
+            return ResponseEntity.ok(new ApiResponse("Login exitoso", jwtResponse));
+
+        } catch (DisabledException e) {
+            log.warn("Login attempt with disabled account: {}", request.getEmail());
+            return ResponseEntity.status(HttpStatus.LOCKED)
+                    .body(new ApiResponse("Cuenta deshabilitada. Contacta al administrador.", null));
 
         } catch (AuthenticationException e) {
+            log.warn("Invalid login attempt for email: {}", request.getEmail());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(new ApiResponse("Invalid email or password!", null));
+                    .body(new ApiResponse("Email o contraseña incorrectos", null));
+
+        } catch (Exception e) {
+            log.error("Login error for email {}: {}", request.getEmail(), e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error interno del servidor", null));
         }
     }
 
-    @PostMapping("/logout")
-    public ResponseEntity<ApiResponse> logout() {
-        SecurityContextHolder.clearContext();
-        return ResponseEntity.ok(new ApiResponse("Logout successful!", null));
+    /**
+     * Endpoint para reenviar verificación desde el proceso de login
+     */
+    @PostMapping("/resend-verification")
+    @Operation(
+            summary = "Reenviar verificación desde login",
+            description = "Reenvía email de verificación cuando el usuario intenta hacer login sin verificar"
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Email reenviado"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Usuario no encontrado"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Email ya verificado")
+    })
+    public ResponseEntity<ApiResponse> resendVerificationFromLogin(@RequestParam String email) {
+        try {
+            log.info("Resend verification request from login for: {}", email);
+
+            if (emailVerificationService.isEmailVerified(email)) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(new ApiResponse("El email ya está verificado. Puedes hacer login.", null));
+            }
+
+            CompletableFuture<Boolean> result = emailVerificationService.resendVerificationToken(email);
+            Boolean sent = result.get();
+
+            if (sent) {
+                return ResponseEntity.ok(
+                        new ApiResponse("Email de verificación reenviado exitosamente", null)
+                );
+            } else {
+                return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                        .body(new ApiResponse("Demasiados intentos. Intenta más tarde.", null));
+            }
+
+        } catch (Exception e) {
+            log.error("Error resending verification from login for {}: {}", email, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error al reenviar verificación", null));
+        }
     }
+
+    /**
+     * Endpoint de estado de autenticación (para debugging)
+     */
+    @GetMapping("/status")
+    @Operation(
+            summary = "Estado de autenticación",
+            description = "Obtiene el estado actual de autenticación (solo para desarrollo)"
+    )
+    public ResponseEntity<ApiResponse> getAuthStatus() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+
+            if (auth != null && auth.isAuthenticated() && !auth.getName().equals("anonymousUser")) {
+                AppUserDetails userDetails = (AppUserDetails) auth.getPrincipal();
+                AuthStatusResponse status = new AuthStatusResponse(
+                        true,
+                        userDetails.getUsername(),
+                        userDetails.getId(),
+                        userDetails.getAuthorities().toString()
+                );
+                return ResponseEntity.ok(new ApiResponse("Usuario autenticado", status));
+            } else {
+                AuthStatusResponse status = new AuthStatusResponse(false, null, null, null);
+                return ResponseEntity.ok(new ApiResponse("Usuario no autenticado", status));
+            }
+
+        } catch (Exception e) {
+            log.error("Error getting auth status: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error al obtener estado de autenticación", null));
+        }
+    }
+
+    /**
+     * Records para respuestas estructuradas
+     */
+    public record RegisterResponse(Long userId, String email, String fullName, boolean emailVerified) {}
+    public record UnverifiedEmailResponse(String email) {}
+    public record AuthStatusResponse(boolean authenticated, String email, Long userId, String authorities) {}
 }

@@ -9,6 +9,9 @@ import org.springframework.data.domain.Pageable;
 
 import java.util.Optional;
 
+/**
+ * Interface del servicio de usuarios con soporte para verificación de email
+ */
 public interface IUserService {
 
     /**
@@ -34,14 +37,48 @@ public interface IUserService {
     Page<User> findAllUsers(Pageable pageable);
 
     /**
-     * Encuentra todos los usuarios activos con paginación
+     * Encuentra todos los usuarios activos (verificados) con paginación
      * @param pageable Información de paginación
      * @return Página de usuarios activos
      */
     Page<User> findActiveUsers(Pageable pageable);
 
     /**
-     * Crea un nuevo usuario con rol USER
+     * Encuentra todos los usuarios verificados con paginación
+     * @param pageable Información de paginación
+     * @return Página de usuarios verificados
+     */
+    Page<User> findVerifiedUsers(Pageable pageable);
+
+    /**
+     * Encuentra todos los usuarios no verificados con paginación
+     * @param pageable Información de paginación
+     * @return Página de usuarios no verificados
+     */
+    Page<User> findUnverifiedUsers(Pageable pageable);
+
+    /**
+     * Convierte un usuario a DTO
+     * @param user Usuario a convertir
+     * @return UserDto
+     */
+    UserDto convertUserToDto(User user);
+
+    /**
+     * Obtiene un usuario como DTO por su ID
+     * @param userId ID del usuario
+     * @return UserDto
+     */
+    UserDto getUserDto(Long userId);
+
+    /**
+     * Obtiene el usuario autenticado actualmente
+     * @return Usuario autenticado
+     */
+    User getAuthenticatedUser();
+
+    /**
+     * Crea un nuevo usuario con rol USER (deshabilitado por defecto)
      * @param request Datos del usuario a crear
      * @return Usuario creado
      * //@throws AlreadyExistsException si el email ya existe
@@ -49,12 +86,20 @@ public interface IUserService {
     User createUser(CreateUserRequest request);
 
     /**
-     * Crea un nuevo usuario con rol ADMIN
+     * Crea un nuevo usuario con rol ADMIN (deshabilitado por defecto)
      * @param request Datos del usuario a crear
      * @return Usuario creado
      * //@throws AlreadyExistsException si el email ya existe
      */
     User createAdminUser(CreateUserRequest request);
+
+    /**
+     * Crea un nuevo usuario pre-verificado (solo uso administrativo)
+     * @param request Datos del usuario a crear
+     * @return Usuario creado y verificado
+     * //@throws AlreadyExistsException si el email ya existe
+     */
+    User createVerifiedUser(CreateUserRequest request);
 
     /**
      * Actualiza un usuario existente
@@ -73,37 +118,36 @@ public interface IUserService {
     void deleteUser(Long userId);
 
     /**
-     * Desactiva un usuario (soft delete)
-     * @param userId ID del usuario a desactivar
-     * //@throws ResourceNotFoundException si no se encuentra el usuario
+     * Verifica el email de un usuario
+     * @param user Usuario a verificar
+     * @return Usuario con email verificado
      */
-    void deactivateUser(Long userId);
+    User verifyUserEmail(User user);
 
     /**
-     * Activa un usuario previamente desactivado
-     * @param userId ID del usuario a activar
-     * //@throws ResourceNotFoundException si no se encuentra el usuario
+     * Deshabilita un usuario (uso administrativo)
+     * @param userId ID del usuario
+     * @return Usuario deshabilitado
      */
-    void activateUser(Long userId);
+    User disableUser(Long userId);
 
     /**
-     * Convierte un User entity a UserDto
-     * @param user Usuario a convertir
-     * @return DTO del usuario
+     * Habilita un usuario manualmente (uso administrativo)
+     * @param userId ID del usuario
+     * @return Usuario habilitado
      */
-    UserDto convertUserToDto(User user);
+    User enableUser(Long userId);
 
     /**
-     * Obtiene el usuario autenticado actualmente
-     * @return Usuario autenticado
-     * //@throws ResourceNotFoundException si no hay usuario autenticado
-     */
-    User getAuthenticatedUser();
-
-    /**
-     * Verifica si existe un usuario con el email dado
+     * Verifica si un email está verificado
      * @param email Email a verificar
-     * @return true si existe, false si no
+     * @return true si está verificado, false si no
      */
-    boolean existsByEmail(String email);
+    boolean isEmailVerified(String email);
+
+    /**
+     * Obtiene estadísticas de usuarios
+     * @return Estadísticas de usuarios
+     */
+    UserService.UserStats getUserStats();
 }

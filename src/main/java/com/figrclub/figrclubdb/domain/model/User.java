@@ -8,9 +8,13 @@ import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.NaturalId;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.HashSet;
 
+/**
+ * Entidad User actualizada con soporte para verificación de email
+ */
 @Getter
 @Setter
 @Entity
@@ -18,7 +22,9 @@ import java.util.HashSet;
 @AllArgsConstructor
 @Builder
 @Table(name = "users", indexes = {
-        @Index(name = "idx_user_email", columnList = "email")
+        @Index(name = "idx_user_email", columnList = "email"),
+        @Index(name = "idx_user_enabled", columnList = "is_enabled"),
+        @Index(name = "idx_user_email_verified", columnList = "email_verified_at")
 })
 public class User extends Auditable {
 
@@ -46,9 +52,16 @@ public class User extends Auditable {
     @Column(nullable = false)
     private String password;
 
+    /**
+     * isEnabled ahora controla si el usuario ha verificado su email
+     * false = email no verificado, true = email verificado
+     */
     @Builder.Default
     @Column(name = "is_enabled", nullable = false)
-    private boolean isEnabled = true;
+    private boolean isEnabled = false; // Cambiado a false por defecto para requerir verificación
+
+    @Column(name = "email_verified_at")
+    private LocalDateTime emailVerifiedAt;
 
     @Builder.Default
     @Column(name = "is_account_non_expired", nullable = false)
@@ -79,6 +92,7 @@ public class User extends Auditable {
         this.lastName = lastName;
         this.email = email;
         this.password = password;
+        this.isEnabled = false; // Usuario debe verificar email
     }
 
     public String getFullName() {
@@ -98,6 +112,50 @@ public class User extends Auditable {
      */
     public boolean isAdmin() {
         return hasRole("ROLE_ADMIN");
+    }
+
+    /**
+     * Verifica si el email está verificado
+     */
+    public boolean isEmailVerified() {
+        return isEnabled && emailVerifiedAt != null;
+    }
+
+    /**
+     * Marca el email como verificado
+     */
+    public void markEmailAsVerified() {
+        this.isEnabled = true;
+        this.emailVerifiedAt = LocalDateTime.now();
+    }
+
+    /**
+     * Deshabilita el usuario (para casos administrativos)
+     */
+    public void disable() {
+        this.isEnabled = false;
+    }
+
+    /**
+     * Habilita el usuario (para casos administrativos)
+     */
+    public void enable() {
+        this.isEnabled = true;
+        if (this.emailVerifiedAt == null) {
+            this.emailVerifiedAt = LocalDateTime.now();
+        }
+    }
+
+    /**
+     * Verifica si la cuenta está completamente activa
+     * (email verificado y no bloqueada/expirada)
+     */
+    public boolean isAccountFullyActive() {
+        return isEnabled &&
+                isAccountNonExpired &&
+                isAccountNonLocked &&
+                isCredentialsNonExpired &&
+                emailVerifiedAt != null;
     }
 }
 

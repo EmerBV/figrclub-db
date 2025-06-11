@@ -10,8 +10,8 @@ import com.figrclub.figrclubdb.security.user.AppUserDetails;
 import com.figrclub.figrclubdb.service.user.IUserService;
 import com.figrclub.figrclubdb.service.email.EmailVerificationService;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,11 +50,6 @@ public class AuthController {
             summary = "Registrar usuario",
             description = "Registra un nuevo usuario y envía email de verificación automáticamente"
     )
-    @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Usuario registrado exitosamente"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Error en los datos de registro"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Email ya existe")
-    })
     public ResponseEntity<ApiResponse> register(@Valid @RequestBody CreateUserRequest request) {
         try {
             log.info("User registration attempt for email: {}", request.getEmail());
@@ -106,12 +101,6 @@ public class AuthController {
             summary = "Iniciar sesión",
             description = "Autentica usuario. Requiere email verificado para acceso completo."
     )
-    @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Login exitoso"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Credenciales inválidas"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Email no verificado"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "423", description = "Cuenta bloqueada")
-    })
     public ResponseEntity<ApiResponse> login(@Valid @RequestBody LoginRequest request) {
         try {
             log.info("Login attempt for email: {}", request.getEmail());
@@ -162,11 +151,6 @@ public class AuthController {
             summary = "Reenviar verificación desde login",
             description = "Reenvía email de verificación cuando el usuario intenta hacer login sin verificar"
     )
-    @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Email reenviado"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Usuario no encontrado"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Email ya verificado")
-    })
     public ResponseEntity<ApiResponse> resendVerificationFromLogin(@RequestParam String email) {
         try {
             log.info("Resend verification request from login for: {}", email);
@@ -229,9 +213,53 @@ public class AuthController {
     }
 
     /**
+     * Logout del usuario
+     */
+    @PostMapping("/logout")
+    @Operation(
+            summary = "Cerrar sesión",
+            description = "Cierra la sesión del usuario autenticado e invalida el token JWT."
+    )
+    public ResponseEntity<ApiResponse> logout(HttpServletRequest request) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+
+            if (auth != null && auth.isAuthenticated() && !auth.getName().equals("anonymousUser")) {
+                String userEmail = auth.getName();
+
+                // Extraer y invalidar el token JWT
+                String token = jwtUtils.extractTokenFromRequest(request);
+                if (token != null) {
+                    jwtUtils.invalidateToken(token);
+                    log.info("User logout with token invalidation: {}", userEmail);
+                } else {
+                    log.info("User logout without token: {}", userEmail);
+                }
+
+                // Limpiar el contexto de seguridad
+                SecurityContextHolder.clearContext();
+
+                return ResponseEntity.ok(
+                        new ApiResponse("Logout exitoso. Token invalidado.",
+                                new LogoutResponse(userEmail, "SUCCESS"))
+                );
+            } else {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(new ApiResponse("No hay sesión activa para cerrar", null));
+            }
+
+        } catch (Exception e) {
+            log.error("Error during logout: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error durante el logout", null));
+        }
+    }
+
+    /**
      * Records para respuestas estructuradas
      */
     public record RegisterResponse(Long userId, String email, String fullName, boolean emailVerified) {}
     public record UnverifiedEmailResponse(String email) {}
     public record AuthStatusResponse(boolean authenticated, String email, Long userId, String authorities) {}
+    public record LogoutResponse(String email, String status) {}
 }

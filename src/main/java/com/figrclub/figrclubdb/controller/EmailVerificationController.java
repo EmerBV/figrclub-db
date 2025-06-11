@@ -7,8 +7,6 @@ import com.figrclub.figrclubdb.service.email.EmailVerificationService;
 import com.figrclub.figrclubdb.service.email.EmailVerificationService.VerificationStats;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
-import io.swagger.v3.oas.annotations.responses.ApiResponse as SwaggerApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.Email;
@@ -44,12 +42,6 @@ public class EmailVerificationController {
             summary = "Verificar email",
             description = "Verifica el email del usuario usando el token de verificación"
     )
-    @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Email verificado exitosamente"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Token inválido"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "410", description = "Token expirado"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Token ya utilizado")
-    })
     public ResponseEntity<ApiResponse> verifyEmail(
             @Parameter(description = "Token de verificación", required = true)
             @RequestParam @NotBlank(message = "Token is required") String token,
@@ -97,12 +89,6 @@ public class EmailVerificationController {
             summary = "Reenviar token de verificación",
             description = "Reenvía el token de verificación al email especificado"
     )
-    @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Token reenviado exitosamente"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Usuario no encontrado"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "Demasiados intentos de reenvío"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Usuario ya verificado")
-    })
     public ResponseEntity<ApiResponse> resendVerificationToken(
             @Parameter(description = "Email del usuario", required = true)
             @RequestParam @Email(message = "Email should be valid") @NotBlank(message = "Email is required") String email) {
@@ -143,10 +129,6 @@ public class EmailVerificationController {
             summary = "Obtener estado de verificación",
             description = "Obtiene el estado de verificación de un email específico"
     )
-    @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Estado obtenido exitosamente"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Usuario no encontrado")
-    })
     public ResponseEntity<ApiResponse> getVerificationStatus(
             @Parameter(description = "Email del usuario", required = true)
             @RequestParam @Email(message = "Email should be valid") @NotBlank(message = "Email is required") String email) {
@@ -179,10 +161,6 @@ public class EmailVerificationController {
             summary = "Verificar si email está verificado",
             description = "Verifica si un email específico ya está verificado"
     )
-    @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Verificación completada"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Email inválido")
-    })
     public ResponseEntity<ApiResponse> checkEmailVerified(
             @Parameter(description = "Email a verificar", required = true)
             @RequestParam @Email(message = "Email should be valid") @NotBlank(message = "Email is required") String email) {

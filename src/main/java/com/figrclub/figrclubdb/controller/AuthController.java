@@ -56,31 +56,40 @@ public class AuthController {
 
             // Crear usuario (inicialmente deshabilitado para verificación)
             User user = userService.createUser(request);
+            log.info("User created successfully with ID: {}", user.getId());
 
-            // Enviar email de verificación automáticamente
+            // Generar y enviar email de verificación automáticamente
             CompletableFuture<Boolean> emailSent = emailVerificationService.generateAndSendVerificationToken(user);
+            log.info("Email verification token generation initiated for user: {}", user.getEmail());
 
             // Preparar respuesta
             String message = "Usuario registrado exitosamente. ";
+            boolean emailSuccess = false;
 
             try {
-                Boolean sent = emailSent.get(); // Esperar resultado del email
-                if (sent) {
-                    message += "Se ha enviado un email de verificación a " + user.getEmail();
+                // Esperar resultado del email (con timeout)
+                emailSuccess = emailSent.get();
+                if (emailSuccess) {
+                    message += "Se ha enviado un email de verificación a " + user.getEmail() + ". " +
+                            "Por favor, revisa tu bandeja de entrada y spam.";
+                    log.info("Verification email sent successfully to: {}", user.getEmail());
                 } else {
-                    message += "Error al enviar email de verificación. Puedes solicitar un reenvío.";
+                    message += "Error al enviar email de verificación. " +
+                            "Puedes solicitar un reenvío más tarde.";
                     log.warn("Failed to send verification email for user: {}", user.getEmail());
                 }
             } catch (Exception e) {
-                message += "Error al enviar email de verificación. Puedes solicitar un reenvío.";
-                log.error("Error waiting for email result for user {}: {}", user.getEmail(), e.getMessage());
+                message += "Error al enviar email de verificación. " +
+                        "Puedes solicitar un reenvío más tarde.";
+                log.error("Error waiting for email result for user {}: {}", user.getEmail(), e.getMessage(), e);
             }
 
             RegisterResponse response = new RegisterResponse(
                     user.getId(),
                     user.getEmail(),
                     user.getFirstName() + " " + user.getLastName(),
-                    user.isEnabled()
+                    user.isEnabled(),
+                    emailSuccess
             );
 
             return ResponseEntity.status(HttpStatus.CREATED)
@@ -258,7 +267,7 @@ public class AuthController {
     /**
      * Records para respuestas estructuradas
      */
-    public record RegisterResponse(Long userId, String email, String fullName, boolean emailVerified) {}
+    public record RegisterResponse(Long userId, String email, String fullName, boolean emailVerified, boolean emailSent) {}
     public record UnverifiedEmailResponse(String email) {}
     public record AuthStatusResponse(boolean authenticated, String email, Long userId, String authorities) {}
     public record LogoutResponse(String email, String status) {}

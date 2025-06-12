@@ -7,7 +7,6 @@ import com.figrclub.figrclubdb.enums.UserType;
 import com.figrclub.figrclubdb.request.UpdateContactInfoRequest;
 import com.figrclub.figrclubdb.request.UpdateBusinessInfoRequest;
 import com.figrclub.figrclubdb.request.UpgradeToProSellerRequest;
-import com.figrclub.figrclubdb.request.UpgradeSubscriptionRequest;
 import com.figrclub.figrclubdb.response.ApiResponse;
 import com.figrclub.figrclubdb.service.user.IUserService;
 import com.figrclub.figrclubdb.service.user.UserService;
@@ -33,39 +32,54 @@ import java.util.Map;
 import static org.springframework.http.HttpStatus.*;
 
 /**
- * Controlador dedicado a la gestión de suscripciones y actualizaciones de usuario
- * Separa las funcionalidades específicas de suscripción del UserController principal
+ * Controlador de suscripciones CORREGIDO con lógica consistente:
+ * - Solo permite FREE + INDIVIDUAL
+ * - Solo permite PRO + PRO_SELLER
+ * - Elimina opciones de upgrade inconsistentes
  */
 @RestController
 @RequestMapping("${api.prefix}/subscriptions")
 @RequiredArgsConstructor
-@Tag(name = "Subscription Management", description = "Operations for managing user subscriptions and upgrades")
+@Tag(name = "Subscription Management", description = "CORRECTED subscription management with consistent logic")
 @Slf4j
 public class SubscriptionController {
 
     private final IUserService userService;
 
-    // ===== ENDPOINTS PARA UPGRADE DE CUENTA =====
+    // ===== ÚNICO ENDPOINT DE UPGRADE CORREGIDO =====
 
     @PostMapping("/upgrade-to-pro-seller")
-    @Operation(summary = "Upgrade current user to Pro Seller",
-            description = "Upgrade authenticated user to Pro Seller with business information")
+    @Operation(
+            summary = "Upgrade to Pro Seller",
+            description = "ÚNICO upgrade disponible: FREE+INDIVIDUAL → PRO+PRO_SELLER"
+    )
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<ApiResponse> upgradeCurrentUserToProSeller(
             @Valid @RequestBody UpgradeToProSellerRequest request) {
         try {
             User currentUser = userService.getAuthenticatedUser();
-            log.info("Current user {} upgrading to Pro Seller", currentUser.getId());
+            log.info("User {} attempting upgrade from FREE+INDIVIDUAL to PRO+PRO_SELLER", currentUser.getId());
+
+            // Validar que el usuario sea FREE + INDIVIDUAL
+            if (!currentUser.isFreeIndividual()) {
+                String currentConfig = currentUser.getSubscriptionType() + "+" + currentUser.getUserType();
+                return ResponseEntity.status(BAD_REQUEST)
+                        .body(new ApiResponse(
+                                String.format("Can only upgrade from FREE+INDIVIDUAL. Current: %s", currentConfig),
+                                null));
+            }
 
             if (!userService.canUpgradeToProSeller(currentUser.getId())) {
                 return ResponseEntity.status(BAD_REQUEST)
-                        .body(new ApiResponse("Cannot upgrade to Pro Seller at this time", null));
+                        .body(new ApiResponse("Cannot upgrade to Pro Seller at this time (email not verified?)", null));
             }
 
             User user = userService.upgradeToProSeller(currentUser.getId(), request);
             UserDto userDto = userService.convertUserToDto(user);
 
-            return ResponseEntity.ok(new ApiResponse("Successfully upgraded to Pro Seller!", userDto));
+            return ResponseEntity.ok(new ApiResponse(
+                    "Successfully upgraded from FREE+INDIVIDUAL to PRO+PRO_SELLER!",
+                    userDto));
         } catch (IllegalStateException e) {
             log.warn("Pro Seller upgrade failed: {}", e.getMessage());
             return ResponseEntity.status(CONFLICT).body(new ApiResponse(e.getMessage(), null));
@@ -76,36 +90,14 @@ public class SubscriptionController {
         }
     }
 
-    @PostMapping("/upgrade-to-pro")
-    @Operation(summary = "Upgrade current user subscription to PRO",
-            description = "Upgrade authenticated user's subscription to PRO")
-    @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<ApiResponse> upgradeCurrentUserToPro(
-            @Valid @RequestBody UpgradeSubscriptionRequest request) {
-        try {
-            User currentUser = userService.getAuthenticatedUser();
-            log.info("Current user {} upgrading subscription to PRO", currentUser.getId());
+    // ===== ENDPOINT ELIMINADO =====
+    /**
+     * MÉTODO ELIMINADO: upgradeCurrentUserToPro
+     * Ya no existe upgrade solo de suscripción
+     * Solo existe: FREE+INDIVIDUAL → PRO+PRO_SELLER
+     */
 
-            if (!userService.canUpgradeSubscription(currentUser.getId())) {
-                return ResponseEntity.status(BAD_REQUEST)
-                        .body(new ApiResponse("Cannot upgrade subscription at this time", null));
-            }
-
-            User user = userService.upgradeSubscriptionToPro(currentUser.getId(), request);
-            UserDto userDto = userService.convertUserToDto(user);
-
-            return ResponseEntity.ok(new ApiResponse("Subscription upgraded to PRO successfully!", userDto));
-        } catch (IllegalStateException e) {
-            log.warn("PRO subscription upgrade failed: {}", e.getMessage());
-            return ResponseEntity.status(CONFLICT).body(new ApiResponse(e.getMessage(), null));
-        } catch (Exception e) {
-            log.error("Error upgrading subscription to PRO", e);
-            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
-                    .body(new ApiResponse("Error upgrading subscription", null));
-        }
-    }
-
-    // ===== ENDPOINTS PARA ACTUALIZACIÓN DE INFORMACIÓN =====
+    // ===== ENDPOINTS DE ACTUALIZACIÓN DE INFORMACIÓN =====
 
     @PutMapping("/contact-info")
     @Operation(summary = "Update contact information",
@@ -133,13 +125,22 @@ public class SubscriptionController {
 
     @PutMapping("/business-info")
     @Operation(summary = "Update business information",
-            description = "Update business information for authenticated Pro Seller")
+            description = "Update business information for authenticated Pro Seller (PRO+PRO_SELLER only)")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<ApiResponse> updateBusinessInfo(
             @Valid @RequestBody UpdateBusinessInfoRequest request) {
         try {
             User currentUser = userService.getAuthenticatedUser();
             log.info("Updating business info for current user {}", currentUser.getId());
+
+            // Validar que sea PRO_SELLER
+            if (!currentUser.isProSeller()) {
+                String currentConfig = currentUser.getSubscriptionType() + "+" + currentUser.getUserType();
+                return ResponseEntity.status(BAD_REQUEST)
+                        .body(new ApiResponse(
+                                String.format("Only PRO+PRO_SELLER can update business info. Current: %s", currentConfig),
+                                null));
+            }
 
             User user = userService.updateBusinessInfo(currentUser.getId(), request);
             UserDto userDto = userService.convertUserToDto(user);
@@ -155,7 +156,7 @@ public class SubscriptionController {
         }
     }
 
-    // ===== ENDPOINTS DE CONSULTA =====
+    // ===== ENDPOINTS DE CONSULTA CORREGIDOS =====
 
     @GetMapping("/my-subscription")
     @Operation(summary = "Get current subscription info",
@@ -168,7 +169,13 @@ public class SubscriptionController {
 
             UserService.UserSubscriptionInfo subscriptionInfo = userService.getSubscriptionInfo(currentUser.getId());
 
-            return ResponseEntity.ok(new ApiResponse("Subscription information retrieved successfully", subscriptionInfo));
+            // Agregar información adicional sobre la validez de la configuración
+            Map<String, Object> response = new HashMap<>();
+            response.put("subscriptionInfo", subscriptionInfo);
+            response.put("isValidConfiguration", currentUser.isValidUserConfiguration());
+            response.put("currentConfiguration", currentUser.getSubscriptionType() + "+" + currentUser.getUserType());
+
+            return ResponseEntity.ok(new ApiResponse("Subscription information retrieved successfully", response));
         } catch (Exception e) {
             log.error("Error getting subscription info", e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR)
@@ -178,42 +185,51 @@ public class SubscriptionController {
 
     @GetMapping("/upgrade-options")
     @Operation(summary = "Get available upgrade options",
-            description = "Get available upgrade options for authenticated user")
+            description = "Get available upgrade options for authenticated user (CORRECTED logic)")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<ApiResponse> getUpgradeOptions() {
         try {
             User currentUser = userService.getAuthenticatedUser();
-            log.debug("Getting upgrade options for current user {}", currentUser.getId());
+            log.debug("Getting CORRECTED upgrade options for user {}", currentUser.getId());
 
             boolean canUpgradeToProSeller = userService.canUpgradeToProSeller(currentUser.getId());
-            boolean canUpgradeSubscription = userService.canUpgradeSubscription(currentUser.getId());
+            String currentConfig = currentUser.getSubscriptionType() + "+" + currentUser.getUserType();
 
             Map<String, Object> options = new HashMap<>();
             options.put("canUpgradeToProSeller", canUpgradeToProSeller);
-            options.put("canUpgradeSubscription", canUpgradeSubscription);
-            options.put("currentSubscription", currentUser.getSubscriptionType());
-            options.put("currentUserType", currentUser.getUserType());
+            options.put("currentConfiguration", currentConfig);
+            options.put("isValidConfiguration", currentUser.isValidUserConfiguration());
             options.put("isEmailVerified", currentUser.isEmailVerified());
 
-            // Información adicional sobre beneficios
+            // CORREGIDO: Solo mostrar la opción válida
+            if (currentUser.isFreeIndividual()) {
+                options.put("availableUpgrade", "PRO+PRO_SELLER");
+                options.put("upgradeDescription", "Become a professional seller with all PRO features");
+            } else if (currentUser.isProSeller()) {
+                options.put("availableUpgrade", "None");
+                options.put("upgradeDescription", "You already have the highest tier (PRO+PRO_SELLER)");
+            } else {
+                // Configuración inconsistente
+                options.put("availableUpgrade", "Contact Support");
+                options.put("upgradeDescription", "Invalid account configuration detected. Please contact support.");
+                options.put("errorMessage", "Invalid user configuration: " + currentConfig);
+            }
+
+            // Información sobre beneficios del PRO_SELLER
             Map<String, Object> benefits = new HashMap<>();
             benefits.put("proSellerBenefits", List.of(
-                    "Create and manage your own store",
-                    "Sell products with professional tools",
-                    "Access to advanced analytics",
+                    "Create and manage your own professional store",
+                    "Sell products with advanced tools",
+                    "Access to comprehensive analytics",
                     "Priority customer support",
-                    "Custom business branding"
-            ));
-            benefits.put("proBenefits", List.of(
-                    "Enhanced features and functionality",
-                    "Increased storage and bandwidth",
-                    "Advanced customization options",
-                    "Priority support"
+                    "Custom business branding",
+                    "Advanced payment processing",
+                    "Inventory management tools"
             ));
 
             options.put("benefits", benefits);
 
-            return ResponseEntity.ok(new ApiResponse("Upgrade options retrieved successfully", options));
+            return ResponseEntity.ok(new ApiResponse("CORRECTED upgrade options retrieved successfully", options));
         } catch (Exception e) {
             log.error("Error getting upgrade options", e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR)
@@ -221,10 +237,11 @@ public class SubscriptionController {
         }
     }
 
-    // ===== ENDPOINTS ADMINISTRATIVOS =====
+    // ===== ENDPOINTS ADMINISTRATIVOS CORREGIDOS =====
 
     @GetMapping("/admin/pro-users")
-    @Operation(summary = "Get PRO users (Admin)", description = "Get all users with PRO subscription")
+    @Operation(summary = "Get PRO users (Admin)",
+            description = "Get all PRO+PRO_SELLER users (corrected logic)")
     @SecurityRequirement(name = "bearerAuth")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> getProUsers(
@@ -233,10 +250,11 @@ public class SubscriptionController {
             @Parameter(description = "Page size")
             @RequestParam(defaultValue = "10") int size) {
         try {
-            log.info("Admin retrieving PRO users");
+            log.info("Admin retrieving PRO users (PRO+PRO_SELLER)");
 
             Pageable pageable = PageRequest.of(page, size, Sort.by("upgradedToProAt").descending());
-            Page<User> proUsersPage = userService.findProUsers(pageable);
+            // CORREGIDO: PRO users son siempre PRO_SELLER
+            Page<User> proUsersPage = userService.findProSellers(pageable);
             Page<UserDto> userDtoPage = proUsersPage.map(userService::convertUserToDto);
 
             Map<String, Object> response = new HashMap<>();
@@ -245,8 +263,9 @@ public class SubscriptionController {
             response.put("totalItems", userDtoPage.getTotalElements());
             response.put("totalPages", userDtoPage.getTotalPages());
             response.put("pageSize", userDtoPage.getSize());
+            response.put("note", "PRO users are always PRO_SELLER in corrected logic");
 
-            return ResponseEntity.ok(new ApiResponse("PRO users retrieved successfully", response));
+            return ResponseEntity.ok(new ApiResponse("PRO users (PRO+PRO_SELLER) retrieved successfully", response));
         } catch (Exception e) {
             log.error("Error retrieving PRO users", e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR)
@@ -254,21 +273,23 @@ public class SubscriptionController {
         }
     }
 
-    @GetMapping("/admin/pro-sellers")
-    @Operation(summary = "Get Pro Sellers (Admin)", description = "Get all Pro Seller users")
+    @GetMapping("/admin/free-users")
+    @Operation(summary = "Get FREE users (Admin)",
+            description = "Get all FREE+INDIVIDUAL users (corrected logic)")
     @SecurityRequirement(name = "bearerAuth")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse> getProSellers(
+    public ResponseEntity<ApiResponse> getFreeUsers(
             @Parameter(description = "Page number (0-based)")
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "Page size")
             @RequestParam(defaultValue = "10") int size) {
         try {
-            log.info("Admin retrieving Pro Sellers");
+            log.info("Admin retrieving FREE users (FREE+INDIVIDUAL)");
 
-            Pageable pageable = PageRequest.of(page, size, Sort.by("upgradedToProAt").descending());
-            Page<User> proSellersPage = userService.findProSellers(pageable);
-            Page<UserDto> userDtoPage = proSellersPage.map(userService::convertUserToDto);
+            Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+            // CORREGIDO: FREE users son siempre INDIVIDUAL
+            Page<User> freeUsersPage = userService.findIndividualUsers(pageable);
+            Page<UserDto> userDtoPage = freeUsersPage.map(userService::convertUserToDto);
 
             Map<String, Object> response = new HashMap<>();
             response.put("users", userDtoPage.getContent());
@@ -276,42 +297,47 @@ public class SubscriptionController {
             response.put("totalItems", userDtoPage.getTotalElements());
             response.put("totalPages", userDtoPage.getTotalPages());
             response.put("pageSize", userDtoPage.getSize());
+            response.put("note", "FREE users are always INDIVIDUAL in corrected logic");
 
-            return ResponseEntity.ok(new ApiResponse("Pro Sellers retrieved successfully", response));
+            return ResponseEntity.ok(new ApiResponse("FREE users (FREE+INDIVIDUAL) retrieved successfully", response));
         } catch (Exception e) {
-            log.error("Error retrieving Pro Sellers", e);
+            log.error("Error retrieving FREE users", e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR)
-                    .body(new ApiResponse("Error retrieving Pro Sellers", null));
+                    .body(new ApiResponse("Error retrieving FREE users", null));
         }
     }
 
     @GetMapping("/admin/subscription-stats")
     @Operation(summary = "Get subscription statistics (Admin)",
-            description = "Get detailed subscription and conversion statistics")
+            description = "Get CORRECTED subscription and conversion statistics")
     @SecurityRequirement(name = "bearerAuth")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> getSubscriptionStats() {
         try {
-            log.info("Admin retrieving subscription statistics");
+            log.info("Admin retrieving CORRECTED subscription statistics");
 
             var stats = userService.getUserStats();
 
             Map<String, Object> response = new HashMap<>();
             response.put("totalUsers", stats.totalUsers());
+            response.put("freeIndividualUsers", stats.freeUsers()); // FREE = INDIVIDUAL
+            response.put("proSellerUsers", stats.proUsers()); // PRO = PRO_SELLER
+
+            // CORREGIDO: Estadísticas consistentes
             response.put("freeUsers", stats.freeUsers());
             response.put("proUsers", stats.proUsers());
-            response.put("individualUsers", stats.individualUsers());
-            response.put("proSellers", stats.proSellers());
+            response.put("individualUsers", stats.individualUsers()); // = freeUsers
+            response.put("proSellers", stats.proSellers()); // = proUsers
 
-            // Calcular estadísticas adicionales
-            response.put("proConversionRate", stats.totalUsers() > 0 ?
-                    (double) stats.proUsers() / stats.totalUsers() * 100 : 0.0);
+            // Calcular tasas de conversión corregidas
             response.put("proSellerConversionRate", stats.totalUsers() > 0 ?
                     (double) stats.proSellers() / stats.totalUsers() * 100 : 0.0);
-            response.put("proToProSellerRate", stats.proUsers() > 0 ?
-                    (double) stats.proSellers() / stats.proUsers() * 100 : 0.0);
 
-            return ResponseEntity.ok(new ApiResponse("Subscription statistics retrieved successfully", response));
+            // Validación de configuraciones
+            response.put("configurationNote", "In corrected logic: FREE=INDIVIDUAL, PRO=PRO_SELLER");
+            response.put("validConfigurations", List.of("FREE+INDIVIDUAL", "PRO+PRO_SELLER"));
+
+            return ResponseEntity.ok(new ApiResponse("CORRECTED subscription statistics retrieved successfully", response));
         } catch (Exception e) {
             log.error("Error retrieving subscription statistics", e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR)
@@ -319,16 +345,16 @@ public class SubscriptionController {
         }
     }
 
-    // ===== ENDPOINT PARA POPUP DEL FRONTEND =====
+    // ===== ENDPOINT CORREGIDO PARA POPUP DEL FRONTEND =====
 
     @GetMapping("/account-type-options")
     @Operation(summary = "Get account type selection options",
-            description = "Get options for the post-verification account type selection popup")
+            description = "CORRECTED options for post-verification account type selection")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<ApiResponse> getAccountTypeOptions() {
         try {
             User currentUser = userService.getAuthenticatedUser();
-            log.debug("Getting account type options for user {}", currentUser.getId());
+            log.debug("Getting CORRECTED account type options for user {}", currentUser.getId());
 
             // Verificar que el usuario esté verificado
             if (!currentUser.isEmailVerified()) {
@@ -339,42 +365,45 @@ public class SubscriptionController {
             Map<String, Object> options = new HashMap<>();
 
             // Información del usuario actual
-            options.put("currentUserType", currentUser.getUserType());
-            options.put("currentSubscription", currentUser.getSubscriptionType());
+            String currentConfig = currentUser.getSubscriptionType() + "+" + currentUser.getUserType();
+            options.put("currentConfiguration", currentConfig);
+            options.put("isValidConfiguration", currentUser.isValidUserConfiguration());
             options.put("canUpgrade", userService.canUpgradeToProSeller(currentUser.getId()));
 
-            // Opciones disponibles
-            Map<String, Object> individualOption = new HashMap<>();
-            individualOption.put("type", UserType.INDIVIDUAL);
-            individualOption.put("subscription", SubscriptionType.FREE);
-            individualOption.put("title", "Cuenta Personal");
-            individualOption.put("description", "Para uso personal y compras ocasionales");
-            individualOption.put("features", List.of(
+            // CORREGIDO: Solo opciones válidas
+            Map<String, Object> freeIndividualOption = new HashMap<>();
+            freeIndividualOption.put("configuration", "FREE+INDIVIDUAL");
+            freeIndividualOption.put("title", "Cuenta Personal Gratuita");
+            freeIndividualOption.put("description", "Para uso personal y compras ocasionales");
+            freeIndividualOption.put("features", List.of(
                     "Comprar productos",
                     "Guardar favoritos",
                     "Historial de compras",
                     "Soporte básico"
             ));
-            individualOption.put("price", "Gratis");
+            freeIndividualOption.put("price", "Gratis");
+            freeIndividualOption.put("isCurrent", currentUser.isFreeIndividual());
 
             Map<String, Object> proSellerOption = new HashMap<>();
-            proSellerOption.put("type", UserType.PRO_SELLER);
-            proSellerOption.put("subscription", SubscriptionType.PRO);
+            proSellerOption.put("configuration", "PRO+PRO_SELLER");
             proSellerOption.put("title", "Vendedor Profesional");
-            proSellerOption.put("description", "Para vender productos y gestionar un negocio");
+            proSellerOption.put("description", "Para vender productos y gestionar un negocio profesional");
             proSellerOption.put("features", List.of(
-                    "Crear y gestionar tienda",
-                    "Vender productos",
-                    "Analytics avanzados",
+                    "Crear y gestionar tienda profesional",
+                    "Vender productos con herramientas avanzadas",
+                    "Analytics y reportes completos",
                     "Soporte prioritario",
-                    "Branding personalizado"
+                    "Branding personalizado",
+                    "Procesamiento de pagos avanzado"
             ));
-            proSellerOption.put("price", "Plan PRO requerido");
-            proSellerOption.put("requiresForm", true);
+            proSellerOption.put("price", "Suscripción PRO incluida");
+            proSellerOption.put("requiresBusinessForm", true);
+            proSellerOption.put("isCurrent", currentUser.isProSeller());
 
-            options.put("accountTypes", List.of(individualOption, proSellerOption));
+            options.put("availableOptions", List.of(freeIndividualOption, proSellerOption));
+            options.put("note", "CORRECTED: Only valid combinations shown (FREE+INDIVIDUAL, PRO+PRO_SELLER)");
 
-            return ResponseEntity.ok(new ApiResponse("Account type options retrieved successfully", options));
+            return ResponseEntity.ok(new ApiResponse("CORRECTED account type options retrieved successfully", options));
         } catch (Exception e) {
             log.error("Error getting account type options", e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR)

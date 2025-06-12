@@ -194,7 +194,7 @@ public class UserController {
     @PreAuthorize("hasRole('ADMIN') or @userService.getAuthenticatedUser().id == #userId")
     public ResponseEntity<ApiResponse> upgradeSubscriptionToPro(
             @PathVariable Long userId,
-            @Valid @RequestBody UpgradeSubscriptionRequest request) {
+            @Valid @RequestBody UpgradeToProSellerRequest request) {
         try {
             log.info("Upgrading subscription to PRO for user {}", userId);
 
@@ -203,7 +203,7 @@ public class UserController {
                         .body(new ApiResponse("User subscription cannot be upgraded", null));
             }
 
-            User user = userService.upgradeSubscriptionToPro(userId, request);
+            User user = userService.upgradeToProSeller(userId, request);
             UserDto userDto = userService.convertUserToDto(user);
 
             return ResponseEntity.ok(new ApiResponse("Subscription upgraded to PRO successfully", userDto));

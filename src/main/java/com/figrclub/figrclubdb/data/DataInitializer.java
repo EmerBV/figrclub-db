@@ -18,10 +18,16 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.util.Set;
 
+/**
+ * DataInitializer CORREGIDO con lógica consistente:
+ * - Solo crea usuarios FREE + INDIVIDUAL
+ * - Solo crea usuarios PRO + PRO_SELLER
+ * - Elimina combinaciones inconsistentes
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
-@Order(1) // Ejecutar primero
+@Order(1)
 public class DataInitializer implements CommandLineRunner {
 
     private final RoleRepository roleRepository;
@@ -48,7 +54,7 @@ public class DataInitializer implements CommandLineRunner {
     @Transactional
     public void run(String... args) throws Exception {
         try {
-            log.info("Starting data initialization...");
+            log.info("Starting data initialization with CORRECTED user logic...");
 
             // 1. Crear roles si no existen
             createRoleIfNotExists("ROLE_USER");
@@ -64,10 +70,9 @@ public class DataInitializer implements CommandLineRunner {
                 createExampleUsers();
             }
 
-            log.info("Data initialization completed successfully");
+            log.info("Data initialization completed successfully with CORRECTED logic");
         } catch (Exception e) {
             log.error("Error during data initialization: {}", e.getMessage(), e);
-            // No lanzar la excepción para que la app pueda arrancar
         }
     }
 
@@ -104,7 +109,7 @@ public class DataInitializer implements CommandLineRunner {
             Role adminRole = roleRepository.findByName("ROLE_ADMIN")
                     .orElseThrow(() -> new RuntimeException("ROLE_ADMIN not found"));
 
-            // Crear usuario administrador con nuevos campos
+            // CORREGIDO: Admin creado como FREE + INDIVIDUAL (lógica consistente)
             User defaultAdmin = User.builder()
                     .firstName(defaultAdminFirstName)
                     .lastName(defaultAdminLastName)
@@ -115,9 +120,9 @@ public class DataInitializer implements CommandLineRunner {
                     .isAccountNonExpired(true)
                     .isAccountNonLocked(true)
                     .isCredentialsNonExpired(true)
-                    // NUEVOS CAMPOS CON VALORES POR DEFECTO
-                    .userType(UserType.INDIVIDUAL) // Admin como usuario individual
-                    .subscriptionType(SubscriptionType.PRO) // Admin con suscripción PRO
+                    // LÓGICA CONSISTENTE: Admin empieza como FREE + INDIVIDUAL
+                    .userType(UserType.INDIVIDUAL)
+                    .subscriptionType(SubscriptionType.FREE)
                     .phone("+34 600 000 000")
                     .country("España")
                     .city("Madrid")
@@ -132,8 +137,9 @@ public class DataInitializer implements CommandLineRunner {
             log.info("📧 Email: {}", defaultAdminEmail);
             log.info("🔑 Password: {} (CHANGE THIS IN PRODUCTION!)", defaultAdminPassword);
             log.info("🆔 User ID: {}", savedAdmin.getId());
-            log.info("👤 User Type: {}", savedAdmin.getUserType());
-            log.info("💳 Subscription: {}", savedAdmin.getSubscriptionType());
+            log.info("👤 User Type: {} (CORRECTED)", savedAdmin.getUserType());
+            log.info("💳 Subscription: {} (CORRECTED)", savedAdmin.getSubscriptionType());
+            log.info("🔧 Config Valid: {}", savedAdmin.isValidUserConfiguration());
 
             // Warning de seguridad
             if (isProductionEnvironment()) {
@@ -147,16 +153,16 @@ public class DataInitializer implements CommandLineRunner {
     }
 
     /**
-     * Crea usuarios de ejemplo para testing (solo en desarrollo)
+     * Crea usuarios de ejemplo CORREGIDOS con lógica consistente
      */
     private void createExampleUsers() {
         try {
-            log.info("Creating example users for development environment...");
+            log.info("Creating CORRECTED example users for development environment...");
 
             Role userRole = roleRepository.findByName("ROLE_USER")
                     .orElseThrow(() -> new RuntimeException("ROLE_USER not found"));
 
-            // 1. Usuario FREE Individual verificado
+            // 1. Usuario FREE + INDIVIDUAL verificado (CORRECTO)
             createExampleUserIfNotExists(
                     "user.free@figrclub.com",
                     "Usuario",
@@ -171,22 +177,7 @@ public class DataInitializer implements CommandLineRunner {
                     "Barcelona"
             );
 
-            // 2. Usuario PRO Individual verificado
-            createExampleUserIfNotExists(
-                    "user.pro@figrclub.com",
-                    "Usuario",
-                    "Pro",
-                    "ProUser123!",
-                    userRole,
-                    UserType.INDIVIDUAL,
-                    SubscriptionType.PRO,
-                    true, // verificado
-                    "+34 600 222 222",
-                    "España",
-                    "Valencia"
-            );
-
-            // 3. Vendedor Profesional verificado
+            // 2. CORREGIDO: Usuario PRO + PRO_SELLER (antes era PRO + INDIVIDUAL)
             User proSeller = createExampleUserIfNotExists(
                     "seller.pro@figrclub.com",
                     "Vendedor",
@@ -201,18 +192,20 @@ public class DataInitializer implements CommandLineRunner {
                     "Sevilla"
             );
 
-            // Agregar información de negocio al vendedor profesional
+            // Agregar información de negocio completa al vendedor profesional
             if (proSeller != null) {
-                proSeller.setBusinessName("TechStore Pro");
-                proSeller.setBusinessDescription("Tienda especializada en tecnología y gadgets");
+                // Usar el método del dominio para mantener consistencia
+                proSeller.updateBusinessInfo("TechStore Pro",
+                        "Tienda especializada en tecnología y gadgets",
+                        null);
                 proSeller.setFiscalAddress("Calle Tecnología 123, 41001 Sevilla, España");
                 proSeller.setTaxId("B12345678");
                 proSeller.setPaymentMethod("STRIPE");
                 userRepository.save(proSeller);
-                log.info("Business info added to Pro Seller: {}", proSeller.getEmail());
+                log.info("Business info added to Pro Seller: {} (PRO+PRO_SELLER)", proSeller.getEmail());
             }
 
-            // 4. Usuario no verificado
+            // 3. Usuario FREE + INDIVIDUAL no verificado (CORRECTO)
             createExampleUserIfNotExists(
                     "user.unverified@figrclub.com",
                     "Usuario",
@@ -227,7 +220,9 @@ public class DataInitializer implements CommandLineRunner {
                     null
             );
 
-            log.info("Example users created successfully!");
+            // 4. ELIMINADO: Usuario PRO + INDIVIDUAL (combinación incorrecta)
+            log.info("✅ CORRECTED example users created successfully!");
+            log.info("📋 Valid combinations only: FREE+INDIVIDUAL and PRO+PRO_SELLER");
 
         } catch (Exception e) {
             log.error("Error creating example users: {}", e.getMessage(), e);
@@ -242,6 +237,13 @@ public class DataInitializer implements CommandLineRunner {
             if (userRepository.existsByEmail(email)) {
                 log.debug("Example user already exists: {}", email);
                 return userRepository.findByEmail(email);
+            }
+
+            // VALIDACIÓN: Solo permitir combinaciones válidas
+            if (!isValidUserConfiguration(userType, subscriptionType)) {
+                log.error("❌ INVALID user configuration attempted: {}+{}. Skipping user: {}",
+                        subscriptionType, userType, email);
+                return null;
             }
 
             User user = User.builder()
@@ -267,13 +269,22 @@ public class DataInitializer implements CommandLineRunner {
             }
 
             User savedUser = userRepository.save(user);
-            log.info("Created example user: {} ({})", email, userType);
+            log.info("✅ Created VALID example user: {} ({}+{})",
+                    email, subscriptionType, userType);
             return savedUser;
 
         } catch (Exception e) {
             log.error("Error creating example user {}: {}", email, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * VALIDACIÓN: Solo permite combinaciones válidas
+     */
+    private boolean isValidUserConfiguration(UserType userType, SubscriptionType subscriptionType) {
+        return (userType == UserType.INDIVIDUAL && subscriptionType == SubscriptionType.FREE) ||
+                (userType == UserType.PRO_SELLER && subscriptionType == SubscriptionType.PRO);
     }
 
     /**

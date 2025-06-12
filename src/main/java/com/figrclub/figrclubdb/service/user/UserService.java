@@ -13,7 +13,6 @@ import com.figrclub.figrclubdb.request.CreateUserRequest;
 import com.figrclub.figrclubdb.request.UpdateContactInfoRequest;
 import com.figrclub.figrclubdb.request.UpdateBusinessInfoRequest;
 import com.figrclub.figrclubdb.request.UpgradeToProSellerRequest;
-import com.figrclub.figrclubdb.request.UpgradeSubscriptionRequest;
 import com.figrclub.figrclubdb.request.UserUpdateRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +21,7 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -31,12 +31,17 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 /**
- * Servicio de usuarios actualizado con soporte para verificación de email
- * y sistema de suscripciones/tipos de usuario
+ * Servicio de usuarios corregido con lógica consistente:
+ * - Solo permite FREE + INDIVIDUAL
+ * - Solo permite PRO + PRO_SELLER
+ * - Elimina métodos que permitían combinaciones inconsistentes
  */
 @Service
 @RequiredArgsConstructor
@@ -47,6 +52,8 @@ public class UserService implements IUserService {
     private final RoleRepository roleRepository;
     private final ModelMapper modelMapper;
     private final PasswordEncoder passwordEncoder;
+
+    // ===== MÉTODOS BÁSICOS DE BÚSQUEDA =====
 
     @Override
     @Transactional(readOnly = true)
@@ -99,20 +106,22 @@ public class UserService implements IUserService {
         return userRepository.findByIsEnabledFalse(pageable);
     }
 
-    // ===== MÉTODOS PARA SUSCRIPCIONES Y TIPOS DE USUARIO =====
+    // ===== MÉTODOS CORREGIDOS PARA SUSCRIPCIONES =====
 
     @Override
     @Transactional(readOnly = true)
     public Page<User> findProUsers(Pageable pageable) {
-        log.debug("Finding PRO users with pagination: {}", pageable);
-        return userRepository.findBySubscriptionType(SubscriptionType.PRO, pageable);
+        log.debug("Finding PRO users (PRO_SELLER) with pagination: {}", pageable);
+        // PRO users son siempre PRO_SELLER según la lógica corregida
+        return userRepository.findByUserType(UserType.PRO_SELLER, pageable);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Page<User> findFreeUsers(Pageable pageable) {
-        log.debug("Finding FREE users with pagination: {}", pageable);
-        return userRepository.findBySubscriptionType(SubscriptionType.FREE, pageable);
+        log.debug("Finding FREE users (INDIVIDUAL) with pagination: {}", pageable);
+        // FREE users son siempre INDIVIDUAL según la lógica corregida
+        return userRepository.findByUserType(UserType.INDIVIDUAL, pageable);
     }
 
     @Override
@@ -129,12 +138,13 @@ public class UserService implements IUserService {
         return userRepository.findByUserType(UserType.INDIVIDUAL, pageable);
     }
 
+    // ===== MÉTODOS DE CONVERSIÓN =====
+
     @Override
     @Transactional(readOnly = true)
     public UserDto convertUserToDto(User user) {
         log.debug("Converting user to DTO: {}", user.getId());
 
-        // Usar ModelMapper para el mapeo básico
         UserDto userDto = modelMapper.map(user, UserDto.class);
 
         // Mapear campos adicionales manualmente
@@ -205,8 +215,10 @@ public class UserService implements IUserService {
         return user;
     }
 
+    // ===== MÉTODOS DE CREACIÓN =====
+
     /**
-     * Crea un usuario con rol específico (MANTIENE LA FUNCIONALIDAD ORIGINAL)
+     * Crea un usuario con rol específico (SIEMPRE FREE + INDIVIDUAL)
      */
     private User createUserWithRole(CreateUserRequest request, String roleName) {
         log.info("Creating user with role {}: {}", roleName, request.getEmail());
@@ -229,13 +241,13 @@ public class UserService implements IUserService {
                 .isAccountNonExpired(true)
                 .isAccountNonLocked(true)
                 .isCredentialsNonExpired(true)
-                // NUEVOS CAMPOS CON VALORES POR DEFECTO
+                // LÓGICA CONSISTENTE: Todo usuario nuevo empieza como FREE + INDIVIDUAL
                 .userType(UserType.INDIVIDUAL)
                 .subscriptionType(SubscriptionType.FREE)
                 .build();
 
         User savedUser = userRepository.save(user);
-        log.info("User created successfully with ID: {} (email verification required)", savedUser.getId());
+        log.info("User created successfully with ID: {} (FREE+INDIVIDUAL, email verification required)", savedUser.getId());
 
         return savedUser;
     }
@@ -252,18 +264,17 @@ public class UserService implements IUserService {
         return createUserWithRole(request, "ROLE_ADMIN");
     }
 
-    /**
-     * Crea un usuario pre-verificado (solo para casos administrativos)
-     */
     @Override
     @Transactional
     public User createVerifiedUser(CreateUserRequest request) {
         User user = createUserWithRole(request, "ROLE_USER");
         user.markEmailAsVerified();
         User savedUser = userRepository.save(user);
-        log.info("Pre-verified user created with ID: {}", savedUser.getId());
+        log.info("Pre-verified user created with ID: {} (FREE+INDIVIDUAL)", savedUser.getId());
         return savedUser;
     }
+
+    // ===== MÉTODOS DE ACTUALIZACIÓN =====
 
     @Override
     @Transactional
@@ -300,20 +311,28 @@ public class UserService implements IUserService {
         log.info("User deleted successfully: {}", userId);
     }
 
-    // ===== MÉTODOS PARA UPGRADE DE USUARIOS =====
+    // ===== MÉTODO CORREGIDO PARA UPGRADE =====
 
+    /**
+     * ÚNICO MÉTODO DE UPGRADE: FREE+INDIVIDUAL → PRO+PRO_SELLER
+     */
     @Override
     @Transactional
     @CacheEvict(value = "users", key = "#userId")
     public User upgradeToProSeller(Long userId, UpgradeToProSellerRequest request) {
-        log.info("Upgrading user {} to Pro Seller", userId);
+        log.info("Upgrading user {} from FREE+INDIVIDUAL to PRO+PRO_SELLER", userId);
 
         User user = getUserById(userId);
 
-        if (user.isProSeller()) {
-            throw new IllegalStateException("User is already a Pro Seller");
+        // Validar que el usuario sea FREE + INDIVIDUAL
+        if (!user.isFreeIndividual()) {
+            throw new IllegalStateException(
+                    String.format("User must be FREE+INDIVIDUAL to upgrade. Current: %s+%s",
+                            user.getSubscriptionType(), user.getUserType())
+            );
         }
 
+        // Realizar upgrade usando el método del dominio
         user.upgradeToProSeller(
                 request.getBusinessName(),
                 request.getBusinessDescription(),
@@ -327,27 +346,7 @@ public class UserService implements IUserService {
         }
 
         User savedUser = userRepository.save(user);
-        log.info("User {} successfully upgraded to Pro Seller", userId);
-
-        return savedUser;
-    }
-
-    @Override
-    @Transactional
-    @CacheEvict(value = "users", key = "#userId")
-    public User upgradeSubscriptionToPro(Long userId, UpgradeSubscriptionRequest request) {
-        log.info("Upgrading subscription to PRO for user {}", userId);
-
-        User user = getUserById(userId);
-
-        if (user.isPro()) {
-            throw new IllegalStateException("User already has PRO subscription");
-        }
-
-        user.upgradeSubscriptionToPro(request.getPaymentMethod());
-
-        User savedUser = userRepository.save(user);
-        log.info("User {} subscription upgraded to PRO", userId);
+        log.info("User {} successfully upgraded to PRO+PRO_SELLER", userId);
 
         return savedUser;
     }
@@ -390,10 +389,7 @@ public class UserService implements IUserService {
 
         User user = getUserById(userId);
 
-        if (!user.isProSeller()) {
-            throw new IllegalStateException("User must be a Pro Seller to update business information");
-        }
-
+        // Usar el método del dominio que ya valida si es PRO_SELLER
         user.updateBusinessInfo(
                 request.getBusinessName(),
                 request.getBusinessDescription(),
@@ -406,9 +402,8 @@ public class UserService implements IUserService {
         return savedUser;
     }
 
-    /**
-     * Verifica el email de un usuario (llamado desde EmailVerificationService)
-     */
+    // ===== MÉTODOS DE VERIFICACIÓN DE EMAIL =====
+
     @Override
     @Transactional
     @CacheEvict(value = "users", key = "#user.id")
@@ -426,9 +421,15 @@ public class UserService implements IUserService {
         }
     }
 
-    /**
-     * Deshabilita un usuario (uso administrativo)
-     */
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isEmailVerified(String email) {
+        User user = userRepository.findByEmail(email);
+        return user != null && user.isEmailVerified();
+    }
+
+    // ===== MÉTODOS DE ACTIVACIÓN/DESACTIVACIÓN =====
+
     @Override
     @Transactional
     @CacheEvict(value = "users", key = "#userId")
@@ -443,9 +444,6 @@ public class UserService implements IUserService {
         return savedUser;
     }
 
-    /**
-     * Habilita un usuario manualmente (uso administrativo)
-     */
     @Override
     @Transactional
     @CacheEvict(value = "users", key = "#userId")
@@ -460,9 +458,6 @@ public class UserService implements IUserService {
         return savedUser;
     }
 
-    /**
-     * Desactiva un usuario (alias para disableUser para compatibilidad)
-     */
     @Override
     @Transactional
     @CacheEvict(value = "users", key = "#userId")
@@ -471,9 +466,6 @@ public class UserService implements IUserService {
         return disableUser(userId);
     }
 
-    /**
-     * Activa un usuario (alias para enableUser para compatibilidad)
-     */
     @Override
     @Transactional
     @CacheEvict(value = "users", key = "#userId")
@@ -482,59 +474,8 @@ public class UserService implements IUserService {
         return enableUser(userId);
     }
 
-    /**
-     * Verifica si un email está verificado
-     */
-    @Override
-    @Transactional(readOnly = true)
-    public boolean isEmailVerified(String email) {
-        User user = userRepository.findByEmail(email);
-        return user != null && user.isEmailVerified();
-    }
+    // ===== MÉTODOS DE BÚSQUEDA AVANZADA =====
 
-    /**
-     * Obtiene estadísticas de usuarios ACTUALIZADAS
-     */
-    @Override
-    @Transactional(readOnly = true)
-    public UserStats getUserStats() {
-        long totalUsers = userRepository.count();
-        long verifiedUsers = userRepository.countByIsEnabledTrue();
-        long unverifiedUsers = totalUsers - verifiedUsers;
-
-        // NUEVAS ESTADÍSTICAS
-        long proUsers = userRepository.countBySubscriptionType(SubscriptionType.PRO);
-        long freeUsers = userRepository.countBySubscriptionType(SubscriptionType.FREE);
-        long proSellers = userRepository.countByUserType(UserType.PRO_SELLER);
-        long individualUsers = userRepository.countByUserType(UserType.INDIVIDUAL);
-
-        return new UserStats(
-                totalUsers,
-                verifiedUsers,
-                unverifiedUsers,
-                proUsers,
-                freeUsers,
-                proSellers,
-                individualUsers
-        );
-    }
-
-    /**
-     * Record para estadísticas de usuarios ACTUALIZADO
-     */
-    public record UserStats(
-            long totalUsers,
-            long verifiedUsers,
-            long unverifiedUsers,
-            long proUsers,
-            long freeUsers,
-            long proSellers,
-            long individualUsers
-    ) {}
-
-    /**
-     * Busca usuarios por nombre o email
-     */
     @Override
     @Transactional(readOnly = true)
     public Page<User> searchUsers(String searchTerm, Pageable pageable) {
@@ -548,14 +489,15 @@ public class UserService implements IUserService {
         return userRepository.findByNameContainingIgnoreCase(cleanSearchTerm, pageable);
     }
 
-    // ===== MÉTODOS DE VERIFICACIÓN ADICIONALES =====
+    // ===== MÉTODOS DE VERIFICACIÓN CORREGIDOS =====
 
     @Override
     @Transactional(readOnly = true)
     public boolean canUpgradeToProSeller(Long userId) {
         try {
             User user = getUserById(userId);
-            return !user.isProSeller() && user.isEmailVerified();
+            // Solo puede upgradear si es FREE+INDIVIDUAL y email verificado
+            return user.canUpgradeToProSeller();
         } catch (ResourceNotFoundException e) {
             return false;
         }
@@ -564,12 +506,8 @@ public class UserService implements IUserService {
     @Override
     @Transactional(readOnly = true)
     public boolean canUpgradeSubscription(Long userId) {
-        try {
-            User user = getUserById(userId);
-            return !user.isPro() && user.isEmailVerified();
-        } catch (ResourceNotFoundException e) {
-            return false;
-        }
+        // Redirigir al método real para compatibilidad
+        return canUpgradeToProSeller(userId);
     }
 
     @Override
@@ -584,12 +522,199 @@ public class UserService implements IUserService {
                 user.isProSeller(),
                 user.canAccessProFeatures(),
                 user.getUpgradedToProAt(),
-                user.getPaymentMethod()
+                user.getPaymentMethod(),
+                user.isValidUserConfiguration() // Nuevo campo para validar configuración
         );
     }
 
+    // ===== MÉTODOS DE ESTADÍSTICAS =====
+
+    @Override
+    @Transactional(readOnly = true)
+    public UserStats getUserStats() {
+        long totalUsers = userRepository.count();
+        long verifiedUsers = userRepository.countByIsEnabledTrue();
+        long unverifiedUsers = totalUsers - verifiedUsers;
+
+        // ESTADÍSTICAS CORREGIDAS CON LÓGICA CONSISTENTE
+        long freeUsers = userRepository.countByUserType(UserType.INDIVIDUAL); // FREE = INDIVIDUAL
+        long proUsers = userRepository.countByUserType(UserType.PRO_SELLER);  // PRO = PRO_SELLER
+        long individualUsers = freeUsers; // Son lo mismo
+        long proSellers = proUsers;       // Son lo mismo
+
+        return new UserStats(
+                totalUsers,
+                verifiedUsers,
+                unverifiedUsers,
+                proUsers,
+                freeUsers,
+                proSellers,
+                individualUsers
+        );
+    }
+
+    // ===== MÉTODOS DE VALIDACIÓN DE CONFIGURACIONES =====
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean hasValidConfiguration(Long userId) {
+        try {
+            User user = getUserById(userId);
+            return user.isValidUserConfiguration();
+        } catch (ResourceNotFoundException e) {
+            return false;
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<User> findUsersWithInvalidConfigurations() {
+        log.debug("Finding users with invalid configurations");
+        return userRepository.findAll().stream()
+                .filter(user -> !user.isValidUserConfiguration())
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countUsersWithInvalidConfigurations() {
+        log.debug("Counting users with invalid configurations");
+        return userRepository.countUsersWithInvalidConfigurations();
+    }
+
+    // ===== MÉTODOS DE CORRECCIÓN MASIVA =====
+
+    @Override
+    @Transactional
+    @PreAuthorize("hasRole('ADMIN')")
+    public int fixInvalidUserConfigurations() {
+        log.info("Starting batch fix of invalid user configurations");
+
+        List<User> invalidUsers = findUsersWithInvalidConfigurations();
+        int fixedCount = 0;
+
+        for (User user : invalidUsers) {
+            try {
+                log.info("Fixing user {} with invalid configuration: {}+{}",
+                        user.getId(), user.getSubscriptionType(), user.getUserType());
+
+                // Estrategia de corrección basada en los datos del usuario
+                if (user.getSubscriptionType() == SubscriptionType.PRO &&
+                        user.getUserType() == UserType.INDIVIDUAL) {
+
+                    // Si tiene datos de negocio, convertir a PRO_SELLER
+                    if (hasBusinessData(user)) {
+                        user.setUserType(UserType.PRO_SELLER);
+                        log.info("Fixed user {} to PRO+PRO_SELLER (has business data)", user.getId());
+                    } else {
+                        // Si no tiene datos de negocio, convertir a FREE+INDIVIDUAL
+                        user.setSubscriptionType(SubscriptionType.FREE);
+                        user.setPaymentMethod(null);
+                        user.setUpgradedToProAt(null);
+                        log.info("Fixed user {} to FREE+INDIVIDUAL (no business data)", user.getId());
+                    }
+
+                } else if (user.getSubscriptionType() == SubscriptionType.FREE &&
+                        user.getUserType() == UserType.PRO_SELLER) {
+
+                    // Convertir a FREE+INDIVIDUAL y limpiar datos de negocio
+                    user.setUserType(UserType.INDIVIDUAL);
+                    clearBusinessData(user);
+                    log.info("Fixed user {} to FREE+INDIVIDUAL (cleared business data)", user.getId());
+                }
+
+                userRepository.save(user);
+                fixedCount++;
+
+            } catch (Exception e) {
+                log.error("Error fixing user {} configuration: {}", user.getId(), e.getMessage());
+            }
+        }
+
+        log.info("Completed batch fix: {} users corrected", fixedCount);
+        return fixedCount;
+    }
+
+    // ===== MÉTODOS DE REPORTES =====
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<String, Long> getConfigurationDistribution() {
+        Map<String, Long> distribution = new HashMap<>();
+
+        distribution.put("FREE+INDIVIDUAL",
+                userRepository.countBySubscriptionTypeAndUserType(SubscriptionType.FREE, UserType.INDIVIDUAL));
+        distribution.put("PRO+PRO_SELLER",
+                userRepository.countBySubscriptionTypeAndUserType(SubscriptionType.PRO, UserType.PRO_SELLER));
+
+        // Configuraciones inválidas (no deberían existir)
+        distribution.put("PRO+INDIVIDUAL",
+                userRepository.countBySubscriptionTypeAndUserType(SubscriptionType.PRO, UserType.INDIVIDUAL));
+        distribution.put("FREE+PRO_SELLER",
+                userRepository.countBySubscriptionTypeAndUserType(SubscriptionType.FREE, UserType.PRO_SELLER));
+
+        return distribution;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SystemHealthReport getSystemHealthReport() {
+        var distribution = getConfigurationDistribution();
+        long totalUsers = userRepository.count();
+        long validUsers = distribution.get("FREE+INDIVIDUAL") + distribution.get("PRO+PRO_SELLER");
+        long invalidUsers = distribution.get("PRO+INDIVIDUAL") + distribution.get("FREE+PRO_SELLER");
+
+        return new SystemHealthReport(
+                totalUsers,
+                validUsers,
+                invalidUsers,
+                invalidUsers == 0,
+                totalUsers > 0 ? (double) validUsers / totalUsers * 100 : 100.0,
+                distribution
+        );
+    }
+
+    // ===== MÉTODOS AUXILIARES PRIVADOS =====
+
     /**
-     * Record para información de suscripción
+     * Verifica si un usuario tiene datos de negocio
+     */
+    private boolean hasBusinessData(User user) {
+        return (user.getBusinessName() != null && !user.getBusinessName().trim().isEmpty()) ||
+                (user.getTaxId() != null && !user.getTaxId().trim().isEmpty()) ||
+                (user.getFiscalAddress() != null && !user.getFiscalAddress().trim().isEmpty());
+    }
+
+    /**
+     * Limpia los datos de negocio de un usuario
+     */
+    private void clearBusinessData(User user) {
+        user.setBusinessName(null);
+        user.setBusinessDescription(null);
+        user.setBusinessLogoUrl(null);
+        user.setFiscalAddress(null);
+        user.setTaxId(null);
+        user.setPaymentMethod(null);
+        user.setUpgradedToProAt(null);
+    }
+
+    // ===== RECORDS PARA DATOS ESTRUCTURADOS =====
+
+    /**
+     * Record para estadísticas de usuarios CORREGIDO
+     */
+    public record UserStats(
+            long totalUsers,
+            long verifiedUsers,
+            long unverifiedUsers,
+            long proUsers,        // = proSellers
+            long freeUsers,       // = individualUsers
+            long proSellers,      // = proUsers
+            long individualUsers  // = freeUsers
+    ) {}
+
+    /**
+     * Record para información de suscripción CORREGIDO
      */
     public record UserSubscriptionInfo(
             SubscriptionType subscriptionType,
@@ -598,6 +723,21 @@ public class UserService implements IUserService {
             boolean isProSeller,
             boolean canAccessProFeatures,
             LocalDateTime upgradedToProAt,
-            String paymentMethod
+            String paymentMethod,
+            boolean isValidConfiguration // Para detectar configuraciones incorrectas
     ) {}
+
+    /**
+     * Record para reporte de salud del sistema
+     */
+    public record SystemHealthReport(
+            long totalUsers,
+            long validUsers,
+            long invalidUsers,
+            boolean isHealthy,
+            double healthPercentage,
+            Map<String, Long> configurationDistribution
+    ) {}
+
+
 }

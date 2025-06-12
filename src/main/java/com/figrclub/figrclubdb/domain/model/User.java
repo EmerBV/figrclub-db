@@ -16,8 +16,9 @@ import java.util.Collection;
 import java.util.HashSet;
 
 /**
- * Entidad User actualizada con soporte para verificación de email
- * y sistema de suscripciones (Free/Pro) con tipos de usuario (Individual/Pro Seller)
+ * Entidad User con lógica consistente:
+ * - FREE + INDIVIDUAL = Usuario básico gratuito
+ * - PRO + PRO_SELLER = Vendedor profesional con suscripción PRO
  */
 @Getter
 @Setter
@@ -72,7 +73,7 @@ public class User extends Auditable {
     @Column(name = "birth_date")
     private LocalDate birthDate;
 
-    // ===== TIPO DE USUARIO Y SUSCRIPCIÓN =====
+    // ===== TIPO DE USUARIO Y SUSCRIPCIÓN (LÓGICA CONSISTENTE) =====
     @Enumerated(EnumType.STRING)
     @Column(name = "user_type", nullable = false)
     @Builder.Default
@@ -108,7 +109,7 @@ public class User extends Auditable {
     // ===== CAMPOS DE ESTADO DE CUENTA =====
     @Builder.Default
     @Column(name = "is_enabled", nullable = false)
-    private boolean isEnabled = false; // false por defecto para requerir verificación
+    private boolean isEnabled = false;
 
     @Column(name = "email_verified_at")
     private LocalDateTime emailVerifiedAt;
@@ -144,7 +145,8 @@ public class User extends Auditable {
         this.lastName = lastName;
         this.email = email;
         this.password = password;
-        this.isEnabled = false; // Usuario debe verificar email
+        this.isEnabled = false;
+        // LÓGICA CONSISTENTE: Usuario básico siempre empieza como FREE + INDIVIDUAL
         this.userType = UserType.INDIVIDUAL;
         this.subscriptionType = SubscriptionType.FREE;
     }
@@ -154,46 +156,28 @@ public class User extends Auditable {
         return firstName + " " + lastName;
     }
 
-    /**
-     * Verifica si el usuario tiene un rol específico
-     */
     public boolean hasRole(String roleName) {
         return roles.stream()
                 .anyMatch(role -> role.getName().equals(roleName));
     }
 
-    /**
-     * Verifica si el usuario es administrador
-     */
     public boolean isAdmin() {
         return hasRole("ROLE_ADMIN");
     }
 
-    /**
-     * Verifica si el email está verificado
-     */
     public boolean isEmailVerified() {
         return isEnabled && emailVerifiedAt != null;
     }
 
-    /**
-     * Marca el email como verificado
-     */
     public void markEmailAsVerified() {
         this.isEnabled = true;
         this.emailVerifiedAt = LocalDateTime.now();
     }
 
-    /**
-     * Deshabilita el usuario (para casos administrativos)
-     */
     public void disable() {
         this.isEnabled = false;
     }
 
-    /**
-     * Habilita el usuario (para casos administrativos)
-     */
     public void enable() {
         this.isEnabled = true;
         if (this.emailVerifiedAt == null) {
@@ -201,9 +185,6 @@ public class User extends Auditable {
         }
     }
 
-    /**
-     * Verifica si la cuenta está completamente activa
-     */
     public boolean isAccountFullyActive() {
         return isEnabled &&
                 isAccountNonExpired &&
@@ -212,10 +193,11 @@ public class User extends Auditable {
                 emailVerifiedAt != null;
     }
 
-    // ===== MÉTODOS PARA SUSCRIPCIONES =====
+    // ===== MÉTODOS CORREGIDOS PARA SUSCRIPCIONES =====
 
     /**
      * Verifica si el usuario tiene suscripción PRO
+     * PRO siempre implica que es PRO_SELLER
      */
     public boolean isPro() {
         return subscriptionType == SubscriptionType.PRO;
@@ -223,16 +205,54 @@ public class User extends Auditable {
 
     /**
      * Verifica si el usuario es un vendedor profesional
+     * PRO_SELLER siempre implica suscripción PRO
      */
     public boolean isProSeller() {
         return userType == UserType.PRO_SELLER;
     }
 
     /**
-     * Actualiza a vendedor profesional con suscripción PRO
+     * Verifica si es usuario básico individual gratuito
+     */
+    public boolean isFreeIndividual() {
+        return userType == UserType.INDIVIDUAL && subscriptionType == SubscriptionType.FREE;
+    }
+
+    /**
+     * Valida que la combinación de tipo de usuario y suscripción sea consistente
+     */
+    public boolean isValidUserConfiguration() {
+        return (userType == UserType.INDIVIDUAL && subscriptionType == SubscriptionType.FREE) ||
+                (userType == UserType.PRO_SELLER && subscriptionType == SubscriptionType.PRO);
+    }
+
+    /**
+     * ÚNICO MÉTODO DE UPGRADE: Actualiza a vendedor profesional con suscripción PRO
+     * FREE + INDIVIDUAL → PRO + PRO_SELLER
      */
     public void upgradeToProSeller(String businessName, String businessDescription,
                                    String fiscalAddress, String taxId, String paymentMethod) {
+
+        // Validar que el usuario actual sea FREE + INDIVIDUAL
+        if (!isFreeIndividual()) {
+            throw new IllegalStateException("Only FREE INDIVIDUAL users can upgrade to PRO SELLER");
+        }
+
+        // Validar datos de negocio requeridos
+        if (businessName == null || businessName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Business name is required for Pro Seller upgrade");
+        }
+        if (fiscalAddress == null || fiscalAddress.trim().isEmpty()) {
+            throw new IllegalArgumentException("Fiscal address is required for Pro Seller upgrade");
+        }
+        if (taxId == null || taxId.trim().isEmpty()) {
+            throw new IllegalArgumentException("Tax ID is required for Pro Seller upgrade");
+        }
+        if (paymentMethod == null || paymentMethod.trim().isEmpty()) {
+            throw new IllegalArgumentException("Payment method is required for Pro Seller upgrade");
+        }
+
+        // Realizar upgrade completo: FREE+INDIVIDUAL → PRO+PRO_SELLER
         this.userType = UserType.PRO_SELLER;
         this.subscriptionType = SubscriptionType.PRO;
         this.businessName = businessName;
@@ -241,17 +261,6 @@ public class User extends Auditable {
         this.taxId = taxId;
         this.paymentMethod = paymentMethod;
         this.upgradedToProAt = LocalDateTime.now();
-    }
-
-    /**
-     * Actualiza solo la suscripción a PRO manteniendo el tipo de usuario
-     */
-    public void upgradeSubscriptionToPro(String paymentMethod) {
-        this.subscriptionType = SubscriptionType.PRO;
-        this.paymentMethod = paymentMethod;
-        if (this.upgradedToProAt == null) {
-            this.upgradedToProAt = LocalDateTime.now();
-        }
     }
 
     /**
@@ -265,32 +274,58 @@ public class User extends Auditable {
     }
 
     /**
-     * Actualiza información de negocio
+     * Actualiza información de negocio (solo para PRO_SELLER)
      */
     public void updateBusinessInfo(String businessName, String businessDescription,
                                    String businessLogoUrl) {
-        if (this.userType == UserType.PRO_SELLER) {
-            this.businessName = businessName;
-            this.businessDescription = businessDescription;
-            this.businessLogoUrl = businessLogoUrl;
+        if (!isProSeller()) {
+            throw new IllegalStateException("Only PRO SELLER users can update business information");
         }
+
+        if (businessName != null && !businessName.trim().isEmpty()) {
+            this.businessName = businessName;
+        }
+        this.businessDescription = businessDescription;
+        this.businessLogoUrl = businessLogoUrl;
     }
 
     /**
      * Verifica si puede acceder a funcionalidades PRO
+     * Solo los PRO_SELLER verificados pueden acceder
      */
     public boolean canAccessProFeatures() {
-        return isPro() && isAccountFullyActive();
+        return isProSeller() && isAccountFullyActive();
     }
 
     /**
-     * Obtiene el nombre para mostrar (nombre comercial si es vendedor, nombre completo si no)
+     * Obtiene el nombre para mostrar
      */
     public String getDisplayName() {
         if (isProSeller() && businessName != null && !businessName.trim().isEmpty()) {
             return businessName;
         }
         return getFullName();
+    }
+
+    /**
+     * Verifica si puede actualizar a PRO_SELLER
+     */
+    public boolean canUpgradeToProSeller() {
+        return isFreeIndividual() && isEmailVerified();
+    }
+
+    // ===== MÉTODOS PARA VALIDACIÓN EN BASE DE DATOS =====
+
+    @PrePersist
+    @PreUpdate
+    private void validateUserConfiguration() {
+        if (!isValidUserConfiguration()) {
+            throw new IllegalStateException(
+                    String.format("Invalid user configuration: %s + %s. " +
+                                    "Valid combinations: FREE+INDIVIDUAL or PRO+PRO_SELLER",
+                            subscriptionType, userType)
+            );
+        }
     }
 }
 

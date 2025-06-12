@@ -6,16 +6,20 @@ import com.figrclub.figrclubdb.request.CreateUserRequest;
 import com.figrclub.figrclubdb.request.UpdateContactInfoRequest;
 import com.figrclub.figrclubdb.request.UpdateBusinessInfoRequest;
 import com.figrclub.figrclubdb.request.UpgradeToProSellerRequest;
-import com.figrclub.figrclubdb.request.UpgradeSubscriptionRequest;
 import com.figrclub.figrclubdb.request.UserUpdateRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.prepost.PreAuthorize;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
- * Interface del servicio de usuarios con soporte completo para verificación de email,
- * gestión de usuarios y sistema de suscripciones/tipos de usuario
+ * Interface del servicio de usuarios CORREGIDA con lógica consistente:
+ * - Solo permite FREE + INDIVIDUAL (usuarios básicos)
+ * - Solo permite PRO + PRO_SELLER (vendedores profesionales)
+ * - Elimina métodos que permitían combinaciones inconsistentes
  */
 public interface IUserService {
 
@@ -63,25 +67,27 @@ public interface IUserService {
      */
     Page<User> findUnverifiedUsers(Pageable pageable);
 
-    // ===== MÉTODOS PARA SUSCRIPCIONES Y TIPOS DE USUARIO =====
+    // ===== MÉTODOS CORREGIDOS PARA SUSCRIPCIONES =====
 
     /**
-     * Encuentra todos los usuarios con suscripción PRO
+     * Encuentra todos los usuarios PRO (que son PRO_SELLER)
+     * En la lógica corregida: PRO = PRO_SELLER
      */
     Page<User> findProUsers(Pageable pageable);
 
     /**
-     * Encuentra todos los usuarios con suscripción FREE
+     * Encuentra todos los usuarios FREE (que son INDIVIDUAL)
+     * En la lógica corregida: FREE = INDIVIDUAL
      */
     Page<User> findFreeUsers(Pageable pageable);
 
     /**
-     * Encuentra todos los vendedores profesionales
+     * Encuentra todos los vendedores profesionales (PRO_SELLER + PRO)
      */
     Page<User> findProSellers(Pageable pageable);
 
     /**
-     * Encuentra todos los usuarios individuales
+     * Encuentra todos los usuarios individuales (INDIVIDUAL + FREE)
      */
     Page<User> findIndividualUsers(Pageable pageable);
 
@@ -105,12 +111,12 @@ public interface IUserService {
     // ===== MÉTODOS DE CREACIÓN =====
 
     /**
-     * Crea un nuevo usuario con rol USER (deshabilitado por defecto)
+     * Crea un nuevo usuario con rol USER (FREE + INDIVIDUAL por defecto)
      */
     User createUser(CreateUserRequest request);
 
     /**
-     * Crea un nuevo usuario con rol ADMIN (deshabilitado por defecto)
+     * Crea un nuevo usuario con rol ADMIN (FREE + INDIVIDUAL por defecto)
      */
     User createAdminUser(CreateUserRequest request);
 
@@ -131,17 +137,13 @@ public interface IUserService {
      */
     void deleteUser(Long userId);
 
-    // ===== MÉTODOS DE UPGRADE DE USUARIOS =====
+    // ===== MÉTODO ÚNICO DE UPGRADE CORREGIDO =====
 
     /**
-     * Actualiza un usuario a vendedor profesional con suscripción PRO
+     * ÚNICO UPGRADE PERMITIDO: FREE+INDIVIDUAL → PRO+PRO_SELLER
+     * Actualiza un usuario básico a vendedor profesional con suscripción PRO
      */
     User upgradeToProSeller(Long userId, UpgradeToProSellerRequest request);
-
-    /**
-     * Actualiza solo la suscripción a PRO manteniendo el tipo de usuario
-     */
-    User upgradeSubscriptionToPro(Long userId, UpgradeSubscriptionRequest request);
 
     /**
      * Actualiza información de contacto adicional
@@ -149,7 +151,7 @@ public interface IUserService {
     User updateContactInfo(Long userId, UpdateContactInfoRequest request);
 
     /**
-     * Actualiza información de negocio (solo para vendedores profesionales)
+     * Actualiza información de negocio (solo para PRO_SELLER)
      */
     User updateBusinessInfo(Long userId, UpdateBusinessInfoRequest request);
 
@@ -187,16 +189,19 @@ public interface IUserService {
      */
     User activateUser(Long userId);
 
-    // ===== MÉTODOS DE VERIFICACIÓN ADICIONALES =====
+    // ===== MÉTODOS DE VERIFICACIÓN CORREGIDOS =====
 
     /**
      * Verifica si un usuario puede actualizar a vendedor profesional
+     * Solo FREE+INDIVIDUAL pueden upgradear a PRO+PRO_SELLER
      */
     boolean canUpgradeToProSeller(Long userId);
 
     /**
-     * Verifica si un usuario puede actualizar su suscripción
+     * @deprecated Usar canUpgradeToProSeller() en su lugar
+     * Solo existe para compatibilidad con código existente
      */
+    @Deprecated
     boolean canUpgradeSubscription(Long userId);
 
     /**
@@ -207,7 +212,45 @@ public interface IUserService {
     // ===== MÉTODOS DE ESTADÍSTICAS =====
 
     /**
-     * Obtiene estadísticas de usuarios
+     * Obtiene estadísticas de usuarios corregidas
      */
     UserService.UserStats getUserStats();
+
+    // ===== MÉTODOS DE VALIDACIÓN DE CONFIGURACIONES =====
+
+    /**
+     * Verifica si un usuario tiene una configuración válida
+     */
+    boolean hasValidConfiguration(Long userId);
+
+    /**
+     * Encuentra usuarios con configuraciones inválidas
+     */
+    List<User> findUsersWithInvalidConfigurations();
+
+    /**
+     * Cuenta usuarios con configuraciones inválidas
+     */
+    long countUsersWithInvalidConfigurations();
+
+    // ===== MÉTODOS ADMINISTRATIVOS DE CORRECCIÓN =====
+
+    /**
+     * Corrige automáticamente configuraciones inválidas (solo admin)
+     * @return número de usuarios corregidos
+     */
+    @PreAuthorize("hasRole('ADMIN')")
+    int fixInvalidUserConfigurations();
+
+    // ===== MÉTODOS DE REPORTES =====
+
+    /**
+     * Obtiene la distribución de configuraciones de usuarios
+     */
+    Map<String, Long> getConfigurationDistribution();
+
+    /**
+     * Obtiene un reporte completo de salud del sistema
+     */
+    UserService.SystemHealthReport getSystemHealthReport();
 }

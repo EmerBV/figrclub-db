@@ -25,6 +25,9 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -262,6 +265,15 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(new ApiResponse("Error durante el logout", null));
         }
+    }
+
+    @GetMapping("/debug-public")  // Sin @PreAuthorize
+    public ResponseEntity<ApiResponse> debugPublic() {
+        Map<String, Object> debug = new HashMap<>();
+        debug.put("mailEnabled", true);
+        debug.put("emailServiceExists", emailVerificationService != null);
+        debug.put("timestamp", LocalDateTime.now());
+        return ResponseEntity.ok(new ApiResponse("Debug público", debug));
     }
 
     /**

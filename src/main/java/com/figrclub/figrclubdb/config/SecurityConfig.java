@@ -44,7 +44,6 @@ public class SecurityConfig {
 
     private static final String[] PUBLIC_URLS = {
             "/figrclub/api/v1/auth/**",
-            "/figrclub/api/v1/users/add", // Registro público
             "/figrclub/api/v1/password/reset-request",
             "/figrclub/api/v1/password/reset-confirm",
             "/figrclub/api/v1/password/validate-token",

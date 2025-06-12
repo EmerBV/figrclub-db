@@ -123,39 +123,26 @@ public class UserController {
         }
     }
 
-    @PostMapping("/add")
-    @Operation(summary = "Create new user", description = "Register a new user with USER role")
-    public ResponseEntity<ApiResponse> createUser(@Valid @RequestBody CreateUserRequest request) {
-        try {
-            log.info("Creating new user with email: {}", request.getEmail());
-            User user = userService.createUser(request);
-            UserDto userDto = userService.convertUserToDto(user);
-            return ResponseEntity.status(CREATED).body(new ApiResponse("User created successfully!", userDto));
-        } catch (AlreadyExistsException e) {
-            log.warn("Attempt to create user with existing email: {}", request.getEmail());
-            return ResponseEntity.status(CONFLICT).body(new ApiResponse(e.getMessage(), null));
-        } catch (Exception e) {
-            log.error("Error creating user", e);
-            return ResponseEntity.status(BAD_REQUEST).body(new ApiResponse("Error creating user", null));
-        }
-    }
-
     @PostMapping("/admin/add")
-    @Operation(summary = "Create admin user", description = "Create a new user with ADMIN role")
+    @Operation(summary = "Create user (Admin only)", description = "Admin creates a pre-verified user")
     @SecurityRequirement(name = "bearerAuth")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse> createAdminUser(@Valid @RequestBody CreateUserRequest request) {
+    public ResponseEntity<ApiResponse> adminCreateUser(@Valid @RequestBody CreateUserRequest request) {
         try {
-            log.info("Creating new admin user with email: {}", request.getEmail());
-            User user = userService.createAdminUser(request);
+            log.info("Admin creating pre-verified user with email: {}", request.getEmail());
+
+            User user = userService.createVerifiedUser(request);
             UserDto userDto = userService.convertUserToDto(user);
-            return ResponseEntity.status(CREATED).body(new ApiResponse("Admin user created successfully!", userDto));
+
+            return ResponseEntity.status(CREATED)
+                    .body(new ApiResponse("User created and verified successfully!", userDto));
         } catch (AlreadyExistsException e) {
-            log.warn("Attempt to create admin user with existing email: {}", request.getEmail());
+            log.warn("Admin attempt to create user with existing email: {}", request.getEmail());
             return ResponseEntity.status(CONFLICT).body(new ApiResponse(e.getMessage(), null));
         } catch (Exception e) {
-            log.error("Error creating admin user", e);
-            return ResponseEntity.status(BAD_REQUEST).body(new ApiResponse("Error creating admin user", null));
+            log.error("Error in admin user creation", e);
+            return ResponseEntity.status(BAD_REQUEST)
+                    .body(new ApiResponse("Error creating user", null));
         }
     }
 

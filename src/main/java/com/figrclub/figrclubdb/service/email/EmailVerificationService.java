@@ -159,7 +159,7 @@ public class EmailVerificationService {
 
             // Activar usuario si no estaba activo
             if (!user.isEnabled()) {
-                user.setEnabled(true);
+                user.markEmailAsVerified();
                 userRepository.save(user);
                 log.info("User {} verified and enabled", user.getEmail());
 

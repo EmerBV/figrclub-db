@@ -1,6 +1,8 @@
 package com.figrclub.figrclubdb.domain.model;
 
 import com.figrclub.figrclubdb.domain.base.Auditable;
+import com.figrclub.figrclubdb.enums.SubscriptionType;
+import com.figrclub.figrclubdb.enums.UserType;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -8,12 +10,14 @@ import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.NaturalId;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.HashSet;
 
 /**
  * Entidad User actualizada con soporte para verificación de email
+ * y sistema de suscripciones (Free/Pro) con tipos de usuario (Individual/Pro Seller)
  */
 @Getter
 @Setter
@@ -24,7 +28,9 @@ import java.util.HashSet;
 @Table(name = "users", indexes = {
         @Index(name = "idx_user_email", columnList = "email"),
         @Index(name = "idx_user_enabled", columnList = "is_enabled"),
-        @Index(name = "idx_user_email_verified", columnList = "email_verified_at")
+        @Index(name = "idx_user_email_verified", columnList = "email_verified_at"),
+        @Index(name = "idx_user_subscription", columnList = "subscription_type"),
+        @Index(name = "idx_user_type", columnList = "user_type")
 })
 public class User extends Auditable {
 
@@ -32,6 +38,7 @@ public class User extends Auditable {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // ===== CAMPOS BÁSICOS DE REGISTRO =====
     @NotBlank(message = "First name is required")
     @Size(min = 2, max = 50, message = "First name must be between 2 and 50 characters")
     @Column(name = "first_name", nullable = false, length = 50)
@@ -52,13 +59,56 @@ public class User extends Auditable {
     @Column(nullable = false)
     private String password;
 
-    /**
-     * isEnabled ahora controla si el usuario ha verificado su email
-     * false = email no verificado, true = email verificado
-     */
+    // ===== CAMPOS DE CONTACTO ADICIONALES =====
+    @Column(name = "phone", length = 20)
+    private String phone;
+
+    @Column(name = "country", length = 100)
+    private String country;
+
+    @Column(name = "city", length = 100)
+    private String city;
+
+    @Column(name = "birth_date")
+    private LocalDate birthDate;
+
+    // ===== TIPO DE USUARIO Y SUSCRIPCIÓN =====
+    @Enumerated(EnumType.STRING)
+    @Column(name = "user_type", nullable = false)
+    @Builder.Default
+    private UserType userType = UserType.INDIVIDUAL;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "subscription_type", nullable = false)
+    @Builder.Default
+    private SubscriptionType subscriptionType = SubscriptionType.FREE;
+
+    // ===== CAMPOS PARA VENDEDORES PROFESIONALES =====
+    @Column(name = "business_name", length = 200)
+    private String businessName;
+
+    @Column(name = "business_description", columnDefinition = "TEXT")
+    private String businessDescription;
+
+    @Column(name = "business_logo_url", length = 500)
+    private String businessLogoUrl;
+
+    @Column(name = "fiscal_address", columnDefinition = "TEXT")
+    private String fiscalAddress;
+
+    @Column(name = "tax_id", length = 50)
+    private String taxId;
+
+    @Column(name = "payment_method", length = 100)
+    private String paymentMethod;
+
+    @Column(name = "upgraded_to_pro_at")
+    private LocalDateTime upgradedToProAt;
+
+    // ===== CAMPOS DE ESTADO DE CUENTA =====
     @Builder.Default
     @Column(name = "is_enabled", nullable = false)
-    private boolean isEnabled = false; // Cambiado a false por defecto para requerir verificación
+    private boolean isEnabled = false; // false por defecto para requerir verificación
 
     @Column(name = "email_verified_at")
     private LocalDateTime emailVerifiedAt;
@@ -75,6 +125,7 @@ public class User extends Auditable {
     @Column(name = "is_credentials_non_expired", nullable = false)
     private boolean isCredentialsNonExpired = true;
 
+    // ===== RELACIONES =====
     @ManyToMany(
             fetch = FetchType.EAGER,
             cascade = { CascadeType.DETACH, CascadeType.MERGE, CascadeType.PERSIST, CascadeType.REFRESH }
@@ -87,14 +138,18 @@ public class User extends Auditable {
     @Builder.Default
     private Collection<Role> roles = new HashSet<>();
 
+    // ===== CONSTRUCTORES =====
     public User(String firstName, String lastName, String email, String password) {
         this.firstName = firstName;
         this.lastName = lastName;
         this.email = email;
         this.password = password;
         this.isEnabled = false; // Usuario debe verificar email
+        this.userType = UserType.INDIVIDUAL;
+        this.subscriptionType = SubscriptionType.FREE;
     }
 
+    // ===== MÉTODOS DE UTILIDAD =====
     public String getFullName() {
         return firstName + " " + lastName;
     }
@@ -148,7 +203,6 @@ public class User extends Auditable {
 
     /**
      * Verifica si la cuenta está completamente activa
-     * (email verificado y no bloqueada/expirada)
      */
     public boolean isAccountFullyActive() {
         return isEnabled &&
@@ -156,6 +210,87 @@ public class User extends Auditable {
                 isAccountNonLocked &&
                 isCredentialsNonExpired &&
                 emailVerifiedAt != null;
+    }
+
+    // ===== MÉTODOS PARA SUSCRIPCIONES =====
+
+    /**
+     * Verifica si el usuario tiene suscripción PRO
+     */
+    public boolean isPro() {
+        return subscriptionType == SubscriptionType.PRO;
+    }
+
+    /**
+     * Verifica si el usuario es un vendedor profesional
+     */
+    public boolean isProSeller() {
+        return userType == UserType.PRO_SELLER;
+    }
+
+    /**
+     * Actualiza a vendedor profesional con suscripción PRO
+     */
+    public void upgradeToProSeller(String businessName, String businessDescription,
+                                   String fiscalAddress, String taxId, String paymentMethod) {
+        this.userType = UserType.PRO_SELLER;
+        this.subscriptionType = SubscriptionType.PRO;
+        this.businessName = businessName;
+        this.businessDescription = businessDescription;
+        this.fiscalAddress = fiscalAddress;
+        this.taxId = taxId;
+        this.paymentMethod = paymentMethod;
+        this.upgradedToProAt = LocalDateTime.now();
+    }
+
+    /**
+     * Actualiza solo la suscripción a PRO manteniendo el tipo de usuario
+     */
+    public void upgradeSubscriptionToPro(String paymentMethod) {
+        this.subscriptionType = SubscriptionType.PRO;
+        this.paymentMethod = paymentMethod;
+        if (this.upgradedToProAt == null) {
+            this.upgradedToProAt = LocalDateTime.now();
+        }
+    }
+
+    /**
+     * Actualiza información de contacto adicional
+     */
+    public void updateContactInfo(String phone, String country, String city, LocalDate birthDate) {
+        this.phone = phone;
+        this.country = country;
+        this.city = city;
+        this.birthDate = birthDate;
+    }
+
+    /**
+     * Actualiza información de negocio
+     */
+    public void updateBusinessInfo(String businessName, String businessDescription,
+                                   String businessLogoUrl) {
+        if (this.userType == UserType.PRO_SELLER) {
+            this.businessName = businessName;
+            this.businessDescription = businessDescription;
+            this.businessLogoUrl = businessLogoUrl;
+        }
+    }
+
+    /**
+     * Verifica si puede acceder a funcionalidades PRO
+     */
+    public boolean canAccessProFeatures() {
+        return isPro() && isAccountFullyActive();
+    }
+
+    /**
+     * Obtiene el nombre para mostrar (nombre comercial si es vendedor, nombre completo si no)
+     */
+    public String getDisplayName() {
+        if (isProSeller() && businessName != null && !businessName.trim().isEmpty()) {
+            return businessName;
+        }
+        return getFullName();
     }
 }
 

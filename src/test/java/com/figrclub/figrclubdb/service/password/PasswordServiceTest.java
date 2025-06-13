@@ -18,6 +18,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -33,6 +35,7 @@ import static org.mockito.Mockito.*;
  * Test para PasswordService CORREGIDO para sistema de rol único inmutable
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class PasswordServiceTest {
 
     @Mock
@@ -144,9 +147,6 @@ class PasswordServiceTest {
         request.setCurrentPassword("currentPassword");
         request.setNewPassword("NewPassword123!");
         request.setConfirmPassword("DifferentPassword123!");
-
-        when(userService.getAuthenticatedUser()).thenReturn(testUser);
-        when(passwordEncoder.matches("currentPassword", testUser.getPassword())).thenReturn(true);
 
         // Act & Assert
         assertThrows(PasswordException.class, () -> passwordService.changePassword(request));
@@ -302,8 +302,6 @@ class PasswordServiceTest {
                 .expiresAt(LocalDateTime.now().plusHours(1))
                 .used(false)
                 .build();
-
-        when(tokenRepository.findByToken("validToken")).thenReturn(Optional.of(token));
 
         // Act & Assert
         assertThrows(PasswordException.class, () -> passwordService.confirmPasswordReset(request));

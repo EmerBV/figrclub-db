@@ -687,36 +687,4 @@ public class UserService implements IUserService {
         public LocalDateTime getUpgradedAt() { return upgradedAt; }
         public boolean isProSeller() { return isProSeller; }
     }
-
-    // ===== MÉTODOS DEPRECADOS PARA COMPATIBILIDAD =====
-
-    /**
-     * Método deprecado para asignar roles - LANZA EXCEPCIÓN
-     * @deprecated Los roles son inmutables y no se pueden modificar
-     */
-    @Deprecated
-    public User assignRoleToUser(Long userId, String roleName) {
-        log.warn("Attempt to modify immutable role for user: {}", userId);
-        throw new RoleModificationException("User roles are immutable and cannot be modified after creation");
-    }
-
-    /**
-     * Método deprecado para remover roles - LANZA EXCEPCIÓN
-     * @deprecated Los roles son inmutables y no se pueden modificar
-     */
-    @Deprecated
-    public User removeRoleFromUser(Long userId, String roleName) {
-        log.warn("Attempt to modify immutable role for user: {}", userId);
-        throw new RoleModificationException("User roles are immutable and cannot be modified after creation");
-    }
-
-    /**
-     * Método deprecado para actualizar roles - LANZA EXCEPCIÓN
-     * @deprecated Los roles son inmutables y no se pueden modificar
-     */
-    @Deprecated
-    public User updateUserRoles(Long userId, java.util.Set<String> roleNames) {
-        log.warn("Attempt to modify immutable role for user: {}", userId);
-        throw new RoleModificationException("User roles are immutable and cannot be modified after creation");
-    }
 }

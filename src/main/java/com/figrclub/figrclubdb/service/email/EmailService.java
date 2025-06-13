@@ -183,15 +183,6 @@ public class EmailService {
     }
 
     /**
-     * Método privado legacy mantenido para compatibilidad (DEPRECATED)
-     * @deprecated Use sendEmailWithRetry instead
-     */
-    @Deprecated
-    private boolean sendEmail(String to, String subject, String htmlContent) {
-        return sendEmailWithRetry(to, subject, htmlContent, 1);
-    }
-
-    /**
      * Construye el contenido del email de verificación - ESTILO ORIGINAL SIMPLE
      */
     private String buildVerificationEmailContent(String userName, String token) {

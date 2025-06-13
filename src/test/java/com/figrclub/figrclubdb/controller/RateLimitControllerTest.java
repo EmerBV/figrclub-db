@@ -1,6 +1,7 @@
 package com.figrclub.figrclubdb.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.figrclub.figrclubdb.config.TestSecurityConfig;
 import com.figrclub.figrclubdb.domain.model.LoginAttempt;
 import com.figrclub.figrclubdb.dto.RateLimitInfo;
 import com.figrclub.figrclubdb.request.BlockRequest;
@@ -8,6 +9,7 @@ import com.figrclub.figrclubdb.service.ratelimit.IRateLimitingService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean; // CORREGIDO: Nueva anotación
@@ -22,6 +24,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(RateLimitController.class)
+@Import(TestSecurityConfig.class)
 class RateLimitControllerTest {
 
     @Autowired
@@ -34,6 +37,7 @@ class RateLimitControllerTest {
     private ObjectMapper objectMapper;
 
     @Test
+    @WithMockUser
     void getRateLimitStatus_Success() throws Exception {
         // Arrange
         RateLimitInfo rateLimitInfo = RateLimitInfo.builder()
@@ -153,6 +157,7 @@ class RateLimitControllerTest {
     }
 
     @Test
+    @WithMockUser(roles = "ADMIN")
     void blockIp_InvalidRequest_BadRequest() throws Exception {
         // Arrange
         BlockRequest request = new BlockRequest();
@@ -241,6 +246,7 @@ class RateLimitControllerTest {
     }
 
     @Test
+    @WithMockUser
     void getRateLimitStatus_WithEmail_Success() throws Exception {
         // Arrange
         RateLimitInfo rateLimitInfo = RateLimitInfo.builder()
@@ -265,6 +271,7 @@ class RateLimitControllerTest {
     }
 
     @Test
+    @WithMockUser
     void getRateLimitStatus_ErrorHandling_ReturnsInternalServerError() throws Exception {
         // Arrange
         when(rateLimitingService.getRateLimitInfo(anyString(), any()))

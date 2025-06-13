@@ -376,34 +376,4 @@ public interface IUserService {
         };
     }
 
-    // ===== MÉTODOS DEPRECADOS PARA COMPATIBILIDAD =====
-
-    @Deprecated
-    default User assignRoleToUser(Long userId, String roleName) {
-        throw new com.figrclub.figrclubdb.exceptions.RoleModificationException(
-                "User roles are immutable and cannot be modified after creation");
-    }
-
-    @Deprecated
-    default User removeRoleFromUser(Long userId, String roleName) {
-        throw new com.figrclub.figrclubdb.exceptions.RoleModificationException(
-                "User roles are immutable and cannot be modified after creation");
-    }
-
-    @Deprecated
-    default User updateUserRoles(Long userId, java.util.Set<String> roleNames) {
-        throw new com.figrclub.figrclubdb.exceptions.RoleModificationException(
-                "User roles are immutable and cannot be modified after creation");
-    }
-
-    /**
-     * @deprecated Use getUserRole() instead
-     * @param userId ID del usuario
-     * @return Set con un solo rol para compatibilidad
-     */
-    @Deprecated
-    default java.util.Set<Role> getUserRoles(Long userId) {
-        Role role = getUserRole(userId);
-        return role != null ? java.util.Set.of(role) : java.util.Set.of();
-    }
 }

@@ -154,30 +154,6 @@ public class UserDto {
         return subscriptionType != null ? subscriptionType.toString() : "Unknown";
     }
 
-    // ===== MÉTODOS DE COMPATIBILIDAD =====
-
-    /**
-     * Método de compatibilidad para código existente que espera una lista de roles
-     * @deprecated Use getRole() instead
-     */
-    @Deprecated
-    @JsonProperty("roles")
-    public java.util.List<String> getRoles() {
-        return role != null ? java.util.List.of(role) : java.util.List.of();
-    }
-
-    /**
-     * Método de compatibilidad para establecer roles (ignora múltiples roles)
-     * Solo toma el primer rol de la lista
-     * @deprecated Use setRole() instead
-     */
-    @Deprecated
-    public void setRoles(java.util.List<String> roles) {
-        if (roles != null && !roles.isEmpty()) {
-            this.role = roles.get(0);
-        }
-    }
-
     /**
      * Verifica si el usuario tiene un rol específico
      */

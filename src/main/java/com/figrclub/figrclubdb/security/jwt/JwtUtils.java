@@ -40,9 +40,8 @@ public class JwtUtils {
     public String generateTokenForUser(Authentication authentication) {
         AppUserDetails userPrincipal = (AppUserDetails) authentication.getPrincipal();
 
-        List<String> roles = userPrincipal.getAuthorities()
-                .stream()
-                .map(GrantedAuthority::getAuthority).toList();
+        // CORREGIDO: Obtener rol único
+        String role = userPrincipal.getRoleName();
 
         // Generar un ID único para el token (para blacklist)
         String tokenId = UUID.randomUUID().toString();
@@ -52,7 +51,8 @@ public class JwtUtils {
                 .setSubject(userPrincipal.getEmail())
                 .setId(tokenId) // JTI claim para identificar el token
                 .claim("id", userPrincipal.getId())
-                .claim("roles", roles)
+                .claim("role", role) // Rol único en lugar de lista
+                .claim("email", userPrincipal.getEmail())
                 .setIssuedAt(new Date())
                 .setExpiration(expirationDate)
                 .signWith(key(), SignatureAlgorithm.HS256)

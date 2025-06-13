@@ -60,7 +60,7 @@ public class ModelMapperConfig {
                 skip().setFullName(null);
                 skip().setDisplayName(null);
                 skip().setAdmin(false);
-                skip().setRoles(null);
+                skip().setRole(null);
                 skip().setEmailVerifiedAt(null);
             }
         });

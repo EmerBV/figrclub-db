@@ -260,18 +260,6 @@ public class User extends Auditable {
         return isEnabled && isEmailVerified() && isAccountNonLocked && isAccountNonExpired;
     }
 
-    // ===== MÉTODOS PARA COMPATIBILIDAD CON SPRING SECURITY =====
-
-    /**
-     * Método de compatibilidad que devuelve el rol como una colección de un elemento
-     * Mantiene compatibilidad con código existente que espera múltiples roles
-     * @deprecated Use getRoleName() or hasRole() instead
-     */
-    @Deprecated
-    public java.util.Set<Role> getRoles() {
-        return role != null ? java.util.Set.of(role) : java.util.Set.of();
-    }
-
     // ===== VALIDACIONES EN SETTERS =====
 
     /**

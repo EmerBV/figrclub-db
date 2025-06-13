@@ -22,6 +22,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Set;
+import java.util.HashSet;
 
 @Component
 @RequiredArgsConstructor
@@ -104,10 +105,19 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     }
 
     private boolean isWhitelistedIp(String ip) {
+        // Validar que tanto la IP como whitelistIps no sean nulos
+        if (ip == null || whitelistIps == null) {
+            return false;
+        }
         return whitelistIps.contains(ip);
     }
 
     private boolean requiresRateLimiting(String path, String method) {
+        // Validaciones de null safety
+        if (path == null || method == null) {
+            return false;
+        }
+
         // Solo aplicar rate limiting a métodos POST/PUT/PATCH
         if (!Set.of("POST", "PUT", "PATCH").contains(method)) {
             return false;
@@ -118,6 +128,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     }
 
     private AttemptType determineAttemptType(String path, String method) {
+        if (path == null) {
+            return AttemptType.API_ACCESS;
+        }
+
         if (path.contains("/auth/login")) {
             return AttemptType.LOGIN;
         } else if (path.contains("/auth/register")) {
@@ -133,6 +147,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     }
 
     private String extractEmailFromRequest(HttpServletRequest request) {
+        if (request == null) {
+            return null;
+        }
+
         // Para solicitudes POST, intentar extraer email del cuerpo
         // Esto es una implementación simplificada
         String email = request.getParameter("email");
@@ -164,57 +182,60 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         }
     }
 
-    private void handleRateLimitExceeded(
-            HttpServletRequest request,
-            HttpServletResponse response,
-            RateLimitExceededException e,
-            String clientIp
-    ) throws IOException {
+    private void handleRateLimitExceeded(HttpServletRequest request, HttpServletResponse response,
+                                         RateLimitExceededException e, String clientIp) {
+        try {
+            log.warn("Rate limit exceeded: IP={}, BlockType={}, Message={}", clientIp, e.getBlockType(), e.getMessage());
 
-        log.warn("Rate limit exceeded: IP={}, BlockType={}, Message={}",
-                clientIp, e.getBlockType(), e.getMessage());
+            response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.setHeader("Retry-After", String.valueOf(e.getRetryAfterSeconds()));
+            response.setHeader("X-RateLimit-Exceeded", "true");
+            response.setHeader("X-RateLimit-Block-Type", e.getBlockType().toString());
 
-        response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.setCharacterEncoding("UTF-8");
+            ApiResponse apiResponse = ApiResponse.builder()
+                    .message(e.getMessage())
+                    .status(HttpStatus.TOO_MANY_REQUESTS.value())
+                    .build();
 
-        // Agregar headers específicos para rate limiting
-        response.setHeader("Retry-After", String.valueOf(e.getBlockDurationMinutes() * 60));
-        response.setHeader("X-RateLimit-Exceeded", "true");
-        response.setHeader("X-RateLimit-Block-Type", e.getBlockType().toString());
-        response.setHeader("X-RateLimit-Block-Duration", String.valueOf(e.getBlockDurationMinutes()));
+            response.getWriter().write(objectMapper.writeValueAsString(apiResponse));
 
-        ApiResponse apiResponse = new ApiResponse(e.getMessage(), null);
-
-        String jsonResponse = objectMapper.writeValueAsString(apiResponse);
-        response.getWriter().write(jsonResponse);
-        response.getWriter().flush();
+        } catch (IOException ioException) {
+            log.error("Error writing rate limit response", ioException);
+        }
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
 
+        if (path == null) {
+            return true;
+        }
+
         // No filtrar recursos estáticos
         if (path.startsWith("/static/") ||
                 path.startsWith("/css/") ||
                 path.startsWith("/js/") ||
                 path.startsWith("/images/") ||
-                path.startsWith("/favicon.ico")) {
+                path.startsWith("/webjars/")) {
             return true;
         }
 
-        // No filtrar endpoints de salud y métricas
-        if (path.startsWith("/actuator/") ||
-                path.startsWith("/health") ||
-                path.startsWith("/metrics")) {
+        // No filtrar endpoints de actuator
+        if (path.startsWith("/actuator/")) {
             return true;
         }
 
-        // No filtrar documentación de API
+        // No filtrar documentación Swagger
         if (path.startsWith("/swagger-ui/") ||
                 path.startsWith("/v3/api-docs") ||
-                path.startsWith("/swagger-resources/")) {
+                path.equals("/swagger-ui.html")) {
+            return true;
+        }
+
+        // No filtrar favicon
+        if (path.equals("/favicon.ico")) {
             return true;
         }
 

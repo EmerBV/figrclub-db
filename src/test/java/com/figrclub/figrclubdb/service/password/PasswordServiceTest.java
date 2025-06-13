@@ -25,7 +25,6 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -162,6 +161,7 @@ class PasswordServiceTest {
         request.setEmail("john.doe@example.com");
 
         when(userRepository.findByEmail("john.doe@example.com")).thenReturn(testUser);
+        when(tokenRepository.countValidTokensByUser(eq(testUser), any(LocalDateTime.class))).thenReturn(0L);
         when(tokenRepository.save(any(PasswordResetToken.class))).thenAnswer(invocation -> {
             PasswordResetToken token = invocation.getArgument(0);
             token.setId(1L);
@@ -176,12 +176,28 @@ class PasswordServiceTest {
     }
 
     @Test
-    void requestPasswordReset_UserNotFound_ThrowsException() {
+    void requestPasswordReset_UserNotFound_NoExceptionThrown() {
         // Arrange
         PasswordResetRequest request = new PasswordResetRequest();
         request.setEmail("nonexistent@example.com");
 
         when(userRepository.findByEmail("nonexistent@example.com")).thenReturn(null);
+
+        // Act & Assert - CORREGIDO: No debería lanzar excepción por razones de seguridad
+        assertDoesNotThrow(() -> passwordService.requestPasswordReset(request));
+
+        // Verify - No debería guardar ningún token
+        verify(tokenRepository, never()).save(any(PasswordResetToken.class));
+    }
+
+    @Test
+    void requestPasswordReset_TooManyActiveTokens_ThrowsException() {
+        // Arrange
+        PasswordResetRequest request = new PasswordResetRequest();
+        request.setEmail("john.doe@example.com");
+
+        when(userRepository.findByEmail("john.doe@example.com")).thenReturn(testUser);
+        when(tokenRepository.countValidTokensByUser(eq(testUser), any(LocalDateTime.class))).thenReturn(3L);
 
         // Act & Assert
         assertThrows(PasswordException.class, () -> passwordService.requestPasswordReset(request));
@@ -303,10 +319,93 @@ class PasswordServiceTest {
                 .used(false)
                 .build();
 
+        when(tokenRepository.findByToken("validToken")).thenReturn(Optional.of(token));
+
         // Act & Assert
         assertThrows(PasswordException.class, () -> passwordService.confirmPasswordReset(request));
 
         // Verify
         verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void isValidResetToken_ValidToken_ReturnsTrue() {
+        // Arrange
+        when(tokenRepository.existsByTokenAndValidState(eq("validToken"), any(LocalDateTime.class))).thenReturn(true);
+
+        // Act
+        boolean result = passwordService.isValidResetToken("validToken");
+
+        // Assert
+        assertTrue(result);
+    }
+
+    @Test
+    void isValidResetToken_InvalidToken_ReturnsFalse() {
+        // Arrange
+        when(tokenRepository.existsByTokenAndValidState(eq("invalidToken"), any(LocalDateTime.class))).thenReturn(false);
+
+        // Act
+        boolean result = passwordService.isValidResetToken("invalidToken");
+
+        // Assert
+        assertFalse(result);
+    }
+
+    @Test
+    void isValidResetToken_ExpiredToken_ReturnsFalse() {
+        // Arrange
+        when(tokenRepository.existsByTokenAndValidState(eq("expiredToken"), any(LocalDateTime.class))).thenReturn(false);
+
+        // Act
+        boolean result = passwordService.isValidResetToken("expiredToken");
+
+        // Assert
+        assertFalse(result);
+    }
+
+    @Test
+    void isValidResetToken_UsedToken_ReturnsFalse() {
+        // Arrange
+        when(tokenRepository.existsByTokenAndValidState(eq("usedToken"), any(LocalDateTime.class))).thenReturn(false);
+
+        // Act
+        boolean result = passwordService.isValidResetToken("usedToken");
+
+        // Assert
+        assertFalse(result);
+    }
+
+    @Test
+    void validatePasswordsMatch_Success() {
+        // Act & Assert
+        assertDoesNotThrow(() -> passwordService.validatePasswordsMatch("password123", "password123"));
+    }
+
+    @Test
+    void validatePasswordsMatch_Mismatch_ThrowsException() {
+        // Act & Assert
+        assertThrows(PasswordException.class,
+                () -> passwordService.validatePasswordsMatch("password123", "differentPassword"));
+    }
+
+    @Test
+    void generateResetToken_ReturnsNonNullToken() {
+        // Act
+        String token = passwordService.generateResetToken();
+
+        // Assert
+        assertNotNull(token);
+        assertFalse(token.isEmpty());
+    }
+
+    @Test
+    void generateResetToken_ReturnsDifferentTokensOnMultipleCalls() {
+        // Act
+        String token1 = passwordService.generateResetToken();
+        String token2 = passwordService.generateResetToken();
+
+        // Assert
+        assertNotEquals(token1, token2);
     }
 }

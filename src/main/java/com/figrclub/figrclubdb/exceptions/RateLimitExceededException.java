@@ -30,4 +30,20 @@ public class RateLimitExceededException extends RuntimeException {
         this.blockDurationMinutes = blockDurationMinutes;
         this.identifier = null;
     }
+
+    /**
+     * Alias para compatibilidad - devuelve el tiempo de bloqueo en minutos
+     * @return tiempo de bloqueo en minutos
+     */
+    public int getRetryAfterMinutes() {
+        return blockDurationMinutes;
+    }
+
+    /**
+     * Devuelve el tiempo de reintento en segundos para el header Retry-After
+     * @return tiempo de reintento en segundos
+     */
+    public int getRetryAfterSeconds() {
+        return blockDurationMinutes * 60;
+    }
 }

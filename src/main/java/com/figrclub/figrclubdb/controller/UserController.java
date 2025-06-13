@@ -4,13 +4,11 @@ import com.figrclub.figrclubdb.domain.model.User;
 import com.figrclub.figrclubdb.dto.UserDto;
 import com.figrclub.figrclubdb.enums.SubscriptionType;
 import com.figrclub.figrclubdb.enums.UserType;
+import com.figrclub.figrclubdb.exceptions.AlreadyExistsException;
 import com.figrclub.figrclubdb.exceptions.ResourceNotFoundException;
 import com.figrclub.figrclubdb.exceptions.RoleModificationException;
+import com.figrclub.figrclubdb.request.*;
 import com.figrclub.figrclubdb.response.ApiResponse;
-import com.figrclub.figrclubdb.request.UpdateContactInfoRequest;
-import com.figrclub.figrclubdb.request.UpdateBusinessInfoRequest;
-import com.figrclub.figrclubdb.request.UpgradeToProSellerRequest;
-import com.figrclub.figrclubdb.request.UserUpdateRequest;
 import com.figrclub.figrclubdb.service.user.IUserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -252,27 +250,6 @@ public class UserController {
         }
     }
 
-    @GetMapping("/roles/policy")
-    @Operation(summary = "Get role policy", description = "Get information about the immutable role policy")
-    @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<ApiResponse> getRolePolicy() {
-        try {
-            Map<String, Object> response = new HashMap<>();
-            response.put("policy", "IMMUTABLE_ROLES");
-            response.put("description", userService.getRoleImmutabilityInfo());
-            response.put("availableRoles", userService.getAvailableRoles());
-            response.put("roleAssignmentTime", "ACCOUNT_CREATION_ONLY");
-            response.put("canModifyRoles", false);
-            response.put("reasonForImmutability", "Security and data integrity");
-
-            return ResponseEntity.ok(new ApiResponse("Role policy retrieved successfully", response));
-        } catch (Exception e) {
-            log.error("Error retrieving role policy", e);
-            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
-                    .body(new ApiResponse("Error retrieving role policy", null));
-        }
-    }
-
     // ===== ENDPOINTS DE ACTUALIZACIÓN (SIN ROLES) =====
 
     @PutMapping("/{userId}")
@@ -397,99 +374,124 @@ public class UserController {
 
     // ===== ENDPOINTS BLOQUEADOS (MODIFICACIÓN DE ROLES) =====
 
-    /**
-     * Endpoint bloqueado: Asignación de roles
-     * Responde con información sobre por qué no está disponible
-     */
-    @PostMapping("/{userId}/roles/assign/{roleName}")
-    @Operation(summary = "Assign role (BLOCKED)", description = "This endpoint is blocked because roles are immutable")
+    // ===== ENDPOINTS DE CREACIÓN DE USUARIOS (SOLO ADMINS) =====
+
+    @PostMapping("/admin/create-user")
+    @Operation(summary = "Create regular user", description = "Create a new user with ROLE_USER (Admin only)")
     @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<ApiResponse> assignRole(
-            @PathVariable Long userId,
-            @PathVariable String roleName) {
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> createUserByAdmin(
+            @Valid @RequestBody CreateUserRequest request,
+            @Parameter(description = "Create pre-verified user")
+            @RequestParam(defaultValue = "false") boolean preVerified) {
+        try {
+            log.info("Admin creating regular user: {}", request.getEmail());
 
-        log.warn("Blocked attempt to assign role {} to user {}", roleName, userId);
+            User user = preVerified
+                    ? userService.createVerifiedUser(request)
+                    : userService.createUser(request);
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("operationBlocked", true);
-        response.put("reason", "IMMUTABLE_ROLES");
-        response.put("explanation", userService.getRoleImmutabilityInfo());
-        response.put("alternative", "Roles can only be assigned during user creation");
-        response.put("currentUserRole", userService.getUserRoleName(userId));
+            UserDto userDto = userService.convertUserToDto(user);
 
-        return ResponseEntity.status(FORBIDDEN)
-                .body(new ApiResponse("Role modification is not allowed", response));
+            Map<String, Object> response = new HashMap<>();
+            response.put("user", userDto);
+            response.put("assignedRole", "ROLE_USER");
+            response.put("roleImmutable", true);
+            response.put("preVerified", preVerified);
+
+            return ResponseEntity.status(CREATED)
+                    .body(new ApiResponse("Regular user created successfully!", response));
+        } catch (AlreadyExistsException e) {
+            log.warn("Admin attempt to create user with existing email: {}", request.getEmail());
+            return ResponseEntity.status(CONFLICT).body(new ApiResponse(e.getMessage(), null));
+        } catch (Exception e) {
+            log.error("Error in admin user creation", e);
+            return ResponseEntity.status(BAD_REQUEST)
+                    .body(new ApiResponse("Error creating user", null));
+        }
     }
 
-    /**
-     * Endpoint bloqueado: Remoción de roles
-     * Responde con información sobre por qué no está disponible
-     */
-    @DeleteMapping("/{userId}/roles/remove/{roleName}")
-    @Operation(summary = "Remove role (BLOCKED)", description = "This endpoint is blocked because roles are immutable")
+    @PostMapping("/admin/create-admin")
+    @Operation(summary = "Create administrator", description = "Create a new user with ROLE_ADMIN (Admin only)")
     @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<ApiResponse> removeRole(
-            @PathVariable Long userId,
-            @PathVariable String roleName) {
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> createAdminByAdmin(
+            @Valid @RequestBody CreateUserRequest request,
+            @Parameter(description = "Create pre-verified admin")
+            @RequestParam(defaultValue = "true") boolean preVerified) {
+        try {
+            log.info("Admin creating another admin user: {}", request.getEmail());
 
-        log.warn("Blocked attempt to remove role {} from user {}", roleName, userId);
+            User user = userService.createAdminUser(request);
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("operationBlocked", true);
-        response.put("reason", "IMMUTABLE_ROLES");
-        response.put("explanation", userService.getRoleImmutabilityInfo());
-        response.put("alternative", "User accounts must be recreated to change roles");
-        response.put("currentUserRole", userService.getUserRoleName(userId));
+            if (preVerified) {
+                user.markEmailAsVerified();
+                user = userService.updateUser(new UserUpdateRequest(), user.getId());
+            }
 
-        return ResponseEntity.status(FORBIDDEN)
-                .body(new ApiResponse("Role modification is not allowed", response));
+            UserDto userDto = userService.convertUserToDto(user);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("user", userDto);
+            response.put("assignedRole", "ROLE_ADMIN");
+            response.put("roleImmutable", true);
+            response.put("preVerified", preVerified);
+            response.put("warning", "Admin user created. Ensure secure password and proper access controls.");
+
+            return ResponseEntity.status(CREATED)
+                    .body(new ApiResponse("Administrator created successfully!", response));
+        } catch (AlreadyExistsException e) {
+            log.warn("Admin attempt to create admin with existing email: {}", request.getEmail());
+            return ResponseEntity.status(CONFLICT).body(new ApiResponse(e.getMessage(), null));
+        } catch (Exception e) {
+            log.error("Error in admin creation", e);
+            return ResponseEntity.status(BAD_REQUEST)
+                    .body(new ApiResponse("Error creating administrator", null));
+        }
     }
 
-    /**
-     * Endpoint bloqueado: Promoción a admin
-     * Responde con información sobre por qué no está disponible
-     */
-    @PostMapping("/{userId}/promote-to-admin")
-    @Operation(summary = "Promote to admin (BLOCKED)", description = "This endpoint is blocked because roles are immutable")
+    @PostMapping("/admin/create-with-role")
+    @Operation(summary = "Create user with specific role", description = "Create user with custom role assignment (Admin only)")
     @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<ApiResponse> promoteToAdmin(@PathVariable Long userId) {
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> createUserWithSpecificRole(
+            @Valid @RequestBody CreateUserRequest request,
+            @Parameter(description = "Role to assign (ROLE_USER or ROLE_ADMIN)")
+            @RequestParam String roleName,
+            @Parameter(description = "Create pre-verified")
+            @RequestParam(defaultValue = "false") boolean preVerified) {
+        try {
+            log.info("Admin creating user with role {}: {}", roleName, request.getEmail());
 
-        log.warn("Blocked attempt to promote user {} to admin", userId);
+            // Validar que el rol sea válido
+            if (!roleName.equals("ROLE_USER") && !roleName.equals("ROLE_ADMIN")) {
+                return ResponseEntity.status(BAD_REQUEST)
+                        .body(new ApiResponse("Invalid role. Only ROLE_USER and ROLE_ADMIN are allowed.", null));
+            }
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("operationBlocked", true);
-        response.put("reason", "IMMUTABLE_ROLES");
-        response.put("explanation", userService.getRoleImmutabilityInfo());
-        response.put("alternative", "Create a new admin account instead");
-        response.put("currentUserRole", userService.getUserRoleName(userId));
+            User user = userService.createUserWithRole(request, roleName);
 
-        return ResponseEntity.status(FORBIDDEN)
-                .body(new ApiResponse("Role promotion is not allowed", response));
+            if (preVerified) {
+                user.markEmailAsVerified();
+                user = userService.updateUser(new UserUpdateRequest(), user.getId());
+            }
+
+            UserDto userDto = userService.convertUserToDto(user);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("user", userDto);
+            response.put("assignedRole", roleName);
+            response.put("roleImmutable", true);
+            response.put("preVerified", preVerified);
+
+            return ResponseEntity.status(CREATED)
+                    .body(new ApiResponse("User created with specific role successfully!", response));
+        } catch (Exception e) {
+            log.error("Error creating user with specific role", e);
+            return ResponseEntity.status(BAD_REQUEST)
+                    .body(new ApiResponse("Error creating user with role", null));
+        }
     }
-
-    /**
-     * Endpoint bloqueado: Revocación de admin
-     * Responde con información sobre por qué no está disponible
-     */
-    @PostMapping("/{userId}/revoke-admin")
-    @Operation(summary = "Revoke admin (BLOCKED)", description = "This endpoint is blocked because roles are immutable")
-    @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<ApiResponse> revokeAdmin(@PathVariable Long userId) {
-
-        log.warn("Blocked attempt to revoke admin from user {}", userId);
-
-        Map<String, Object> response = new HashMap<>();
-        response.put("operationBlocked", true);
-        response.put("reason", "IMMUTABLE_ROLES");
-        response.put("explanation", userService.getRoleImmutabilityInfo());
-        response.put("alternative", "Disable the admin account instead");
-        response.put("currentUserRole", userService.getUserRoleName(userId));
-
-        return ResponseEntity.status(FORBIDDEN)
-                .body(new ApiResponse("Role revocation is not allowed", response));
-    }
-
-    // ===== ENDPOINT DE ELIMINACIÓN =====
 
     @DeleteMapping("/{userId}")
     @Operation(summary = "Delete user", description = "Delete a user (Admin only)")
@@ -586,5 +588,4 @@ public class UserController {
         return ResponseEntity.status(FORBIDDEN)
                 .body(new ApiResponse("Role modification is not allowed", response));
     }
-
 }

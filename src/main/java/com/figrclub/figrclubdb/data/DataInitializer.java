@@ -17,12 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 
-/**
- * DataInitializer CORREGIDO para sistema de rol único inmutable:
- * - Cada usuario tiene exactamente un rol
- * - Los roles se asignan solo durante la creación
- * - Solo crea usuarios FREE + INDIVIDUAL y PRO + PRO_SELLER
- */
+
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -33,7 +28,6 @@ public class DataInitializer implements CommandLineRunner {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
 
-    // Configuración del admin por defecto desde application.properties
     @Value("${app.admin.default.email:admin@figrclub.com}")
     private String defaultAdminEmail;
 
@@ -55,16 +49,13 @@ public class DataInitializer implements CommandLineRunner {
         try {
             log.info("Starting data initialization with IMMUTABLE ROLES system...");
 
-            // 1. Crear roles si no existen
             createRoleIfNotExists("ROLE_USER", "Regular user role with standard access");
             createRoleIfNotExists("ROLE_ADMIN", "Administrator role with full system access");
 
-            // 2. Crear administrador por defecto si está habilitado
             if (createDefaultAdmin) {
                 createDefaultAdminIfNotExists();
             }
 
-            // 3. Crear usuarios de ejemplo para testing (solo en desarrollo)
             if (isDevEnvironment()) {
                 createExampleUsers();
             }
@@ -91,42 +82,38 @@ public class DataInitializer implements CommandLineRunner {
 
     private void createDefaultAdminIfNotExists() {
         try {
-            // Verificar si ya existe un administrador
+
             if (userRepository.existsByEmail(defaultAdminEmail)) {
                 log.info("Default admin already exists with email: {}", defaultAdminEmail);
                 return;
             }
 
-            // Verificar si ya existe algún usuario con rol ADMIN
             long adminCount = userRepository.countByRoleName("ROLE_ADMIN");
             if (adminCount > 0) {
                 log.info("Admin users already exist ({}), skipping default admin creation", adminCount);
                 return;
             }
 
-            // Obtener rol de administrador
             Role adminRole = roleRepository.findByName("ROLE_ADMIN")
                     .orElseThrow(() -> new RuntimeException("ROLE_ADMIN not found"));
 
-            // CORREGIDO: Crear admin con constructor manual (sin .roles() ni .build())
             User defaultAdmin = new User();
             defaultAdmin.setFirstName(defaultAdminFirstName);
             defaultAdmin.setLastName(defaultAdminLastName);
             defaultAdmin.setEmail(defaultAdminEmail);
             defaultAdmin.setPassword(passwordEncoder.encode(defaultAdminPassword));
-            defaultAdmin.setRole(adminRole); // CORREGIDO: Sin .roles()
-            defaultAdmin.setEnabled(true); // Admin pre-verificado
+            defaultAdmin.setRole(adminRole);
+            defaultAdmin.setEnabled(true);
             defaultAdmin.setAccountNonExpired(true);
             defaultAdmin.setAccountNonLocked(true);
             defaultAdmin.setCredentialsNonExpired(true);
-            // LÓGICA CONSISTENTE: Admin empieza como FREE + INDIVIDUAL
+
             defaultAdmin.setUserType(UserType.INDIVIDUAL);
             defaultAdmin.setSubscriptionType(SubscriptionType.FREE);
             defaultAdmin.setPhone("+34 600 000 000");
             defaultAdmin.setCountry("España");
             defaultAdmin.setCity("Madrid");
 
-            // Marcar como verificado
             defaultAdmin.markEmailAsVerified();
 
             User savedAdmin = userRepository.save(defaultAdmin);
@@ -147,20 +134,18 @@ public class DataInitializer implements CommandLineRunner {
         try {
             log.info("Creating example users for development...");
 
-            // Obtener roles
             Role userRole = roleRepository.findByName("ROLE_USER")
                     .orElseThrow(() -> new RuntimeException("ROLE_USER not found"));
             Role adminRole = roleRepository.findByName("ROLE_ADMIN")
                     .orElseThrow(() -> new RuntimeException("ROLE_ADMIN not found"));
 
-            // 1. Usuario regular básico (FREE + INDIVIDUAL)
             if (!userRepository.existsByEmail("user@example.com")) {
                 User regularUser = new User();
                 regularUser.setFirstName("Juan");
                 regularUser.setLastName("Pérez");
                 regularUser.setEmail("user@example.com");
                 regularUser.setPassword(passwordEncoder.encode("User123!"));
-                regularUser.setRole(userRole); // Rol único
+                regularUser.setRole(userRole);
                 regularUser.setUserType(UserType.INDIVIDUAL);
                 regularUser.setSubscriptionType(SubscriptionType.FREE);
                 regularUser.setEnabled(true);
@@ -177,14 +162,13 @@ public class DataInitializer implements CommandLineRunner {
                 log.info("✅ Created regular user: user@example.com (ROLE_USER + FREE + INDIVIDUAL)");
             }
 
-            // 2. Vendedor profesional (PRO + PRO_SELLER) con rol USER
             if (!userRepository.existsByEmail("proseller@example.com")) {
                 User proSeller = new User();
                 proSeller.setFirstName("María");
                 proSeller.setLastName("García");
                 proSeller.setEmail("proseller@example.com");
                 proSeller.setPassword(passwordEncoder.encode("ProSeller123!"));
-                proSeller.setRole(userRole); // Rol USER, pero PRO_SELLER
+                proSeller.setRole(userRole);
                 proSeller.setUserType(UserType.PRO_SELLER);
                 proSeller.setSubscriptionType(SubscriptionType.PRO);
                 proSeller.setEnabled(true);
@@ -196,7 +180,6 @@ public class DataInitializer implements CommandLineRunner {
                 proSeller.setCity("Madrid");
                 proSeller.setBirthDate(LocalDate.of(1985, 8, 22));
 
-                // Información de negocio
                 proSeller.updateBusinessInfo("TechStore Pro",
                         "Tienda especializada en tecnología y gadgets",
                         null);
@@ -209,14 +192,13 @@ public class DataInitializer implements CommandLineRunner {
                 log.info("✅ Created pro seller: proseller@example.com (ROLE_USER + PRO + PRO_SELLER)");
             }
 
-            // 3. Admin que también es Pro Seller (combinación válida)
             if (!userRepository.existsByEmail("adminpro@example.com")) {
                 User adminProSeller = new User();
                 adminProSeller.setFirstName("Carlos");
                 adminProSeller.setLastName("Administrador");
                 adminProSeller.setEmail("adminpro@example.com");
                 adminProSeller.setPassword(passwordEncoder.encode("AdminPro123!"));
-                adminProSeller.setRole(adminRole); // Rol ADMIN y PRO_SELLER
+                adminProSeller.setRole(adminRole);
                 adminProSeller.setUserType(UserType.PRO_SELLER);
                 adminProSeller.setSubscriptionType(SubscriptionType.PRO);
                 adminProSeller.setEnabled(true);
@@ -227,7 +209,6 @@ public class DataInitializer implements CommandLineRunner {
                 adminProSeller.setCountry("España");
                 adminProSeller.setCity("Valencia");
 
-                // Información de negocio
                 adminProSeller.setBusinessName("AdminStore Enterprise");
                 adminProSeller.setBusinessDescription("Empresa de administración y ventas");
                 adminProSeller.setFiscalAddress("Avenida Admin 456, Valencia");
@@ -239,7 +220,6 @@ public class DataInitializer implements CommandLineRunner {
                 log.info("✅ Created admin pro seller: adminpro@example.com (ROLE_ADMIN + PRO + PRO_SELLER)");
             }
 
-            // 4. Usuario regular para testing de upgrade
             if (!userRepository.existsByEmail("upgrade@example.com")) {
                 User upgradeUser = new User();
                 upgradeUser.setFirstName("Ana");

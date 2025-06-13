@@ -9,11 +9,10 @@ import lombok.Data;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * DTO para representar un usuario en las respuestas de la API
- * Actualizado con campos de suscripción y negocio
+ * ACTUALIZADO para manejar un solo rol inmutable por usuario
  */
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -56,8 +55,32 @@ public class UserDto {
     private boolean credentialsNonExpired;
     private boolean admin;
 
-    // ===== ROLES =====
-    private List<String> roles;
+    // ===== ROL ÚNICO E INMUTABLE =====
+
+    /**
+     * CAMBIO PRINCIPAL: Un solo rol en lugar de una lista
+     * El rol no puede ser modificado después de la creación del usuario
+     */
+    @JsonProperty("role")
+    private String role;
+
+    /**
+     * ID del rol (útil para operaciones internas)
+     */
+    @JsonProperty("roleId")
+    private Long roleId;
+
+    /**
+     * Descripción del rol (opcional)
+     */
+    @JsonProperty("roleDescription")
+    private String roleDescription;
+
+    /**
+     * Indica si el rol se puede modificar (siempre false para mantener inmutabilidad)
+     */
+    @JsonProperty("roleModifiable")
+    private final boolean roleModifiable = false;
 
     // ===== CAMPOS DE AUDITORÍA =====
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -87,76 +110,108 @@ public class UserDto {
     }
 
     /**
-     * Verifica si es usuario PRO
+     * Verifica si el usuario está completamente activo
      */
-    @JsonProperty("isPro")
-    public boolean isPro() {
-        return subscriptionType == SubscriptionType.PRO;
+    @JsonProperty("active")
+    public boolean isActive() {
+        return enabled && isEmailVerified() && accountNonLocked && accountNonExpired;
     }
 
     /**
-     * Verifica si es vendedor profesional
+     * Verifica si es un vendedor profesional
      */
-    @JsonProperty("isProSeller")
+    @JsonProperty("proSeller")
     public boolean isProSeller() {
-        return userType == UserType.PRO_SELLER;
+        return userType == UserType.PRO_SELLER && subscriptionType == SubscriptionType.PRO;
     }
 
     /**
-     * Obtiene el estado de la cuenta
+     * Verifica si es un usuario individual básico
      */
-    @JsonProperty("accountStatus")
-    public String getAccountStatus() {
-        if (!enabled) {
-            return "PENDING_VERIFICATION";
-        } else if (!accountNonLocked) {
-            return "LOCKED";
-        } else if (!accountNonExpired) {
-            return "EXPIRED";
-        } else if (!credentialsNonExpired) {
-            return "CREDENTIALS_EXPIRED";
-        } else {
-            return "ACTIVE";
+    @JsonProperty("individualUser")
+    public boolean isIndividualUser() {
+        return userType == UserType.INDIVIDUAL && subscriptionType == SubscriptionType.FREE;
+    }
+
+    /**
+     * Obtiene el tipo de usuario como string legible
+     */
+    @JsonProperty("userTypeDisplay")
+    public String getUserTypeDisplay() {
+        if (isProSeller()) {
+            return "Professional Seller";
+        } else if (isIndividualUser()) {
+            return "Individual User";
+        }
+        return userType != null ? userType.toString() : "Unknown";
+    }
+
+    /**
+     * Obtiene el estado de la suscripción como string legible
+     */
+    @JsonProperty("subscriptionDisplay")
+    public String getSubscriptionDisplay() {
+        return subscriptionType != null ? subscriptionType.toString() : "Unknown";
+    }
+
+    // ===== MÉTODOS DE COMPATIBILIDAD =====
+
+    /**
+     * Método de compatibilidad para código existente que espera una lista de roles
+     * @deprecated Use getRole() instead
+     */
+    @Deprecated
+    @JsonProperty("roles")
+    public java.util.List<String> getRoles() {
+        return role != null ? java.util.List.of(role) : java.util.List.of();
+    }
+
+    /**
+     * Método de compatibilidad para establecer roles (ignora múltiples roles)
+     * Solo toma el primer rol de la lista
+     * @deprecated Use setRole() instead
+     */
+    @Deprecated
+    public void setRoles(java.util.List<String> roles) {
+        if (roles != null && !roles.isEmpty()) {
+            this.role = roles.get(0);
         }
     }
 
     /**
-     * Obtiene el estado de la suscripción
+     * Verifica si el usuario tiene un rol específico
      */
-    @JsonProperty("subscriptionStatus")
-    public String getSubscriptionStatus() {
-        if (subscriptionType == SubscriptionType.PRO) {
-            return upgradedToProAt != null ? "ACTIVE_PRO" : "PRO";
-        }
-        return "FREE";
+    public boolean hasRole(String roleName) {
+        return role != null && role.equals(roleName);
     }
 
     /**
-     * Verifica si tiene información de negocio completa
+     * Información sobre por qué el rol no se puede modificar
      */
-    @JsonProperty("hasCompleteBusinessInfo")
-    public boolean hasCompleteBusinessInfo() {
-        return isProSeller() &&
-                businessName != null && !businessName.trim().isEmpty() &&
-                fiscalAddress != null && !fiscalAddress.trim().isEmpty() &&
-                taxId != null && !taxId.trim().isEmpty();
+    @JsonProperty("roleModificationReason")
+    public String getRoleModificationReason() {
+        return "User roles are immutable and cannot be changed after account creation for security reasons";
+    }
+
+    // ===== INFORMACIÓN DE ROL PARA LA API =====
+
+    /**
+     * Información completa del rol para respuestas de API
+     */
+    @JsonProperty("roleInfo")
+    public RoleInfo getRoleInfo() {
+        return new RoleInfo(role, roleId, roleDescription, roleModifiable, admin);
     }
 
     /**
-     * Verifica si puede acceder a funcionalidades PRO
+     * Clase interna para información detallada del rol
      */
-    @JsonProperty("canAccessProFeatures")
-    public boolean canAccessProFeatures() {
-        return isPro() && "ACTIVE".equals(getAccountStatus());
-    }
-
-    /**
-     * Obtiene información de perfil de contacto completado
-     */
-    @JsonProperty("contactInfoComplete")
-    public boolean isContactInfoComplete() {
-        return phone != null && !phone.trim().isEmpty() &&
-                country != null && !country.trim().isEmpty() &&
-                city != null && !city.trim().isEmpty();
+    @Data
+    public static class RoleInfo {
+        private final String name;
+        private final Long id;
+        private final String description;
+        private final boolean modifiable;
+        private final boolean isAdmin;
     }
 }

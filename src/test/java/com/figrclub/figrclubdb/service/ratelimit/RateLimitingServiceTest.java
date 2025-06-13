@@ -58,7 +58,7 @@ class RateLimitingServiceTest {
                 .lastName("User")
                 .email(testEmail)
                 .password("encodedPassword")
-                .roles(Set.of(userRole))
+                .role(userRole)
                 .build();
     }
 

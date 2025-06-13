@@ -10,76 +10,87 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.util.List;
-import java.util.Optional;
-
 /**
- * Repositorio de usuarios CORREGIDO con funcionalidad completa de roles y tiers
+ * Repositorio de usuarios ACTUALIZADO para trabajar con rol único
+ * Todas las consultas ahora usan la relación ManyToOne con Role
  */
 @Repository
 public interface UserRepository extends JpaRepository<User, Long> {
 
-    // ===== MÉTODOS BÁSICOS DE BÚSQUEDA =====
+    // ===== MÉTODOS BÁSICOS =====
 
     /**
-     * Encuentra un usuario por email
+     * Busca un usuario por email
      */
     User findByEmail(String email);
-
-    /**
-     * Encuentra un usuario por email (Optional)
-     */
-    Optional<User> findOptionalByEmail(String email);
 
     /**
      * Verifica si existe un usuario con el email dado
      */
     boolean existsByEmail(String email);
 
-    // ===== MÉTODOS POR ESTADO DE ACTIVACIÓN =====
+    // ===== MÉTODOS DE BÚSQUEDA POR CONTENIDO =====
 
     /**
-     * Encuentra usuarios activos (habilitados)
+     * Busca usuarios por email, nombre o apellido (case insensitive)
      */
-    Page<User> findByIsEnabledTrue(Pageable pageable);
+    Page<User> findByEmailContainingIgnoreCaseOrFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCase(
+            String email, String firstName, String lastName, Pageable pageable);
+
+    // ===== MÉTODOS POR ESTADO DE CUENTA =====
 
     /**
-     * Encuentra usuarios inactivos (deshabilitados)
+     * Encuentra usuarios activos (habilitados y verificados)
      */
-    Page<User> findByIsEnabledFalse(Pageable pageable);
+    Page<User> findByIsEnabledTrueAndEmailVerifiedAtIsNotNull(Pageable pageable);
 
     /**
-     * Cuenta usuarios activos
+     * Encuentra usuarios verificados
      */
-    long countByIsEnabledTrue();
+    Page<User> findByEmailVerifiedAtIsNotNull(Pageable pageable);
 
     /**
-     * Cuenta usuarios inactivos
+     * Encuentra usuarios no verificados
      */
-    long countByIsEnabledFalse();
+    Page<User> findByEmailVerifiedAtIsNull(Pageable pageable);
 
-    // ===== MÉTODOS DE ROLES CORREGIDOS/AÑADIDOS =====
+    /**
+     * Cuenta usuarios activos (habilitados y verificados)
+     */
+    long countByIsEnabledTrueAndEmailVerifiedAtIsNotNull();
+
+    /**
+     * Cuenta usuarios verificados
+     */
+    long countByEmailVerifiedAtIsNotNull();
+
+    // ===== MÉTODOS POR ROL ÚNICO =====
 
     /**
      * Encuentra usuarios por nombre de rol
      */
-    @Query("SELECT u FROM User u JOIN u.roles r WHERE r.name = :roleName")
+    @Query("SELECT u FROM User u WHERE u.role.name = :roleName")
     Page<User> findByRoleName(@Param("roleName") String roleName, Pageable pageable);
 
     /**
      * Cuenta usuarios por nombre de rol
      */
-    @Query("SELECT COUNT(u) FROM User u JOIN u.roles r WHERE r.name = :roleName")
+    @Query("SELECT COUNT(u) FROM User u WHERE u.role.name = :roleName")
     long countByRoleName(@Param("roleName") String roleName);
 
     /**
-     * Verifica si un usuario tiene un rol específico
+     * Encuentra usuarios administradores
      */
-    @Query("SELECT CASE WHEN COUNT(u) > 0 THEN true ELSE false END " +
-            "FROM User u JOIN u.roles r WHERE u.id = :userId AND r.name = :roleName")
-    boolean userHasRole(@Param("userId") Long userId, @Param("roleName") String roleName);
+    @Query("SELECT u FROM User u WHERE u.role.name = 'ROLE_ADMIN'")
+    Page<User> findAdminUsers(Pageable pageable);
 
-    // ===== MÉTODOS CORREGIDOS POR TIPO DE USUARIO =====
+    /**
+     * Encuentra usuarios regulares (no admin)
+     */
+    @Query("SELECT u FROM User u WHERE u.role.name = 'ROLE_USER'")
+    Page<User> findRegularUsers(Pageable pageable);
+
+    // ===== MÉTODOS POR TIPO DE USUARIO =====
 
     /**
      * Encuentra usuarios por tipo de usuario
@@ -91,7 +102,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
      */
     long countByUserType(UserType userType);
 
-    // ===== MÉTODOS CORREGIDOS POR SUSCRIPCIÓN =====
+    // ===== MÉTODOS POR SUSCRIPCIÓN =====
 
     /**
      * Encuentra usuarios por tipo de suscripción
@@ -103,201 +114,65 @@ public interface UserRepository extends JpaRepository<User, Long> {
      */
     long countBySubscriptionType(SubscriptionType subscriptionType);
 
+    /**
+     * Cuenta usuarios por tipo de usuario y suscripción
+     */
+    long countByUserTypeAndSubscriptionType(UserType userType, SubscriptionType subscriptionType);
+
     // ===== MÉTODOS COMBINADOS: ROLES + TIERS =====
 
     /**
      * Encuentra administradores que son PRO_SELLER
      */
-    @Query("SELECT u FROM User u JOIN u.roles r WHERE r.name = 'ROLE_ADMIN' AND u.userType = 'PRO_SELLER'")
+    @Query("SELECT u FROM User u WHERE u.role.name = 'ROLE_ADMIN' AND u.userType = 'PRO_SELLER'")
     Page<User> findAdminProSellers(Pageable pageable);
 
     /**
      * Cuenta administradores que son PRO_SELLER
      */
-    @Query("SELECT COUNT(u) FROM User u JOIN u.roles r WHERE r.name = 'ROLE_ADMIN' AND u.userType = 'PRO_SELLER'")
+    @Query("SELECT COUNT(u) FROM User u WHERE u.role.name = 'ROLE_ADMIN' AND u.userType = 'PRO_SELLER'")
     long countAdminProSellers();
 
     /**
      * Encuentra usuarios regulares que son PRO_SELLER
      */
-    @Query("SELECT u FROM User u JOIN u.roles r WHERE r.name = 'ROLE_USER' AND u.userType = 'PRO_SELLER' " +
-            "AND NOT EXISTS (SELECT 1 FROM User u2 JOIN u2.roles r2 WHERE u2.id = u.id AND r2.name = 'ROLE_ADMIN')")
+    @Query("SELECT u FROM User u WHERE u.role.name = 'ROLE_USER' AND u.userType = 'PRO_SELLER'")
     Page<User> findRegularProSellers(Pageable pageable);
 
     /**
      * Cuenta usuarios regulares que son PRO_SELLER
      */
-    @Query("SELECT COUNT(u) FROM User u JOIN u.roles r WHERE r.name = 'ROLE_USER' AND u.userType = 'PRO_SELLER' " +
-            "AND NOT EXISTS (SELECT 1 FROM User u2 JOIN u2.roles r2 WHERE u2.id = u.id AND r2.name = 'ROLE_ADMIN')")
+    @Query("SELECT COUNT(u) FROM User u WHERE u.role.name = 'ROLE_USER' AND u.userType = 'PRO_SELLER'")
     long countRegularProSellers();
 
     /**
      * Encuentra administradores que son usuarios básicos (INDIVIDUAL)
      */
-    @Query("SELECT u FROM User u JOIN u.roles r WHERE r.name = 'ROLE_ADMIN' AND u.userType = 'INDIVIDUAL'")
+    @Query("SELECT u FROM User u WHERE u.role.name = 'ROLE_ADMIN' AND u.userType = 'INDIVIDUAL'")
     Page<User> findAdminBasicUsers(Pageable pageable);
 
     /**
      * Cuenta administradores que son usuarios básicos (INDIVIDUAL)
      */
-    @Query("SELECT COUNT(u) FROM User u JOIN u.roles r WHERE r.name = 'ROLE_ADMIN' AND u.userType = 'INDIVIDUAL'")
+    @Query("SELECT COUNT(u) FROM User u WHERE u.role.name = 'ROLE_ADMIN' AND u.userType = 'INDIVIDUAL'")
     long countAdminBasicUsers();
 
     /**
-     * Cuenta usuarios regulares que son básicos (INDIVIDUAL)
+     * Encuentra usuarios regulares que son usuarios básicos (INDIVIDUAL)
      */
-    @Query("SELECT COUNT(u) FROM User u JOIN u.roles r WHERE r.name = 'ROLE_USER' AND u.userType = 'INDIVIDUAL' " +
-            "AND NOT EXISTS (SELECT 1 FROM User u2 JOIN u2.roles r2 WHERE u2.id = u.id AND r2.name = 'ROLE_ADMIN')")
+    @Query("SELECT u FROM User u WHERE u.role.name = 'ROLE_USER' AND u.userType = 'INDIVIDUAL'")
+    Page<User> findRegularBasicUsers(Pageable pageable);
+
+    /**
+     * Cuenta usuarios regulares que son usuarios básicos (INDIVIDUAL)
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.role.name = 'ROLE_USER' AND u.userType = 'INDIVIDUAL'")
     long countRegularBasicUsers();
 
-    // ===== MÉTODOS PARA VALIDACIÓN DE CONFIGURACIONES =====
+    // ===== MÉTODOS DE ELEGIBILIDAD PARA UPGRADE =====
 
     /**
-     * Encuentra usuarios con una combinación específica de suscripción y tipo de usuario
-     */
-    Page<User> findBySubscriptionTypeAndUserType(
-            SubscriptionType subscriptionType,
-            UserType userType,
-            Pageable pageable);
-
-    /**
-     * Cuenta usuarios con una combinación específica de suscripción y tipo de usuario
-     */
-    long countBySubscriptionTypeAndUserType(
-            SubscriptionType subscriptionType,
-            UserType userType);
-
-    // ===== MÉTODOS DE BÚSQUEDA POR NOMBRE =====
-
-    /**
-     * Busca usuarios por nombre o apellido (ignorando mayúsculas/minúsculas)
-     */
-    @Query("SELECT u FROM User u WHERE " +
-            "LOWER(u.firstName) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-            "LOWER(u.lastName) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-            "LOWER(CONCAT(u.firstName, ' ', u.lastName)) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-            "LOWER(u.email) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-            "LOWER(u.businessName) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
-    Page<User> findByNameContainingIgnoreCase(@Param("searchTerm") String searchTerm, Pageable pageable);
-
-    // ===== MÉTODOS DE ESTADÍSTICAS AVANZADAS =====
-
-    /**
-     * Cuenta usuarios verificados (activos)
-     */
-    @Query("SELECT COUNT(u) FROM User u WHERE u.isEnabled = true AND u.emailVerifiedAt IS NOT NULL")
-    long countVerifiedUsers();
-
-    /**
-     * Cuenta usuarios no verificados
-     */
-    @Query("SELECT COUNT(u) FROM User u WHERE u.isEnabled = false OR u.emailVerifiedAt IS NULL")
-    long countUnverifiedUsers();
-
-    /**
-     * Encuentra usuarios PRO con datos de negocio completos
-     */
-    @Query("SELECT u FROM User u WHERE " +
-            "u.userType = 'PRO_SELLER' AND " +
-            "u.subscriptionType = 'PRO' AND " +
-            "u.businessName IS NOT NULL AND " +
-            "u.fiscalAddress IS NOT NULL AND " +
-            "u.taxId IS NOT NULL AND " +
-            "u.paymentMethod IS NOT NULL")
-    Page<User> findProSellersWithCompleteBusinessData(Pageable pageable);
-
-    /**
-     * Encuentra usuarios PRO con datos de negocio incompletos
-     */
-    @Query("SELECT u FROM User u WHERE " +
-            "u.userType = 'PRO_SELLER' AND " +
-            "u.subscriptionType = 'PRO' AND " +
-            "(u.businessName IS NULL OR " +
-            "u.fiscalAddress IS NULL OR " +
-            "u.taxId IS NULL OR " +
-            "u.paymentMethod IS NULL)")
-    Page<User> findProSellersWithIncompleteBusinessData(Pageable pageable);
-
-    // ===== MÉTODOS PARA DIAGNÓSTICOS =====
-
-    /**
-     * Encuentra usuarios con configuraciones inválidas
-     * Solo deberían existir: FREE+INDIVIDUAL y PRO+PRO_SELLER
-     */
-    @Query("SELECT u FROM User u WHERE NOT (" +
-            "(u.subscriptionType = 'FREE' AND u.userType = 'INDIVIDUAL') OR " +
-            "(u.subscriptionType = 'PRO' AND u.userType = 'PRO_SELLER')" +
-            ")")
-    Page<User> findUsersWithInvalidConfigurations(Pageable pageable);
-
-    /**
-     * Cuenta usuarios con configuraciones inválidas
-     */
-    @Query("SELECT COUNT(u) FROM User u WHERE NOT (" +
-            "(u.subscriptionType = 'FREE' AND u.userType = 'INDIVIDUAL') OR " +
-            "(u.subscriptionType = 'PRO' AND u.userType = 'PRO_SELLER')" +
-            ")")
-    long countUsersWithInvalidConfigurations();
-
-    /**
-     * Encuentra usuarios INDIVIDUAL que tienen datos de negocio (inconsistencia)
-     */
-    @Query("SELECT u FROM User u WHERE " +
-            "u.userType = 'INDIVIDUAL' AND " +
-            "(u.businessName IS NOT NULL OR " +
-            "u.fiscalAddress IS NOT NULL OR " +
-            "u.taxId IS NOT NULL OR " +
-            "u.paymentMethod IS NOT NULL)")
-    Page<User> findIndividualUsersWithBusinessData(Pageable pageable);
-
-    /**
-     * Cuenta usuarios INDIVIDUAL con datos de negocio
-     */
-    @Query("SELECT COUNT(u) FROM User u WHERE " +
-            "u.userType = 'INDIVIDUAL' AND " +
-            "(u.businessName IS NOT NULL OR " +
-            "u.fiscalAddress IS NOT NULL OR " +
-            "u.taxId IS NOT NULL OR " +
-            "u.paymentMethod IS NOT NULL)")
-    long countIndividualUsersWithBusinessData();
-
-    // ===== MÉTODOS DE BÚSQUEDA AVANZADA =====
-
-    /**
-     * Busca usuarios por criterios múltiples
-     */
-    @Query("SELECT u FROM User u WHERE " +
-            "(:email IS NULL OR LOWER(u.email) LIKE LOWER(CONCAT('%', :email, '%'))) AND " +
-            "(:userType IS NULL OR u.userType = :userType) AND " +
-            "(:subscriptionType IS NULL OR u.subscriptionType = :subscriptionType) AND " +
-            "(:isEnabled IS NULL OR u.isEnabled = :isEnabled)")
-    Page<User> findUsersByCriteria(
-            @Param("email") String email,
-            @Param("userType") UserType userType,
-            @Param("subscriptionType") SubscriptionType subscriptionType,
-            @Param("isEnabled") Boolean isEnabled,
-            Pageable pageable);
-
-    /**
-     * Busca usuarios por criterios múltiples incluyendo roles
-     */
-    @Query("SELECT DISTINCT u FROM User u LEFT JOIN u.roles r WHERE " +
-            "(:email IS NULL OR LOWER(u.email) LIKE LOWER(CONCAT('%', :email, '%'))) AND " +
-            "(:userType IS NULL OR u.userType = :userType) AND " +
-            "(:subscriptionType IS NULL OR u.subscriptionType = :subscriptionType) AND " +
-            "(:isEnabled IS NULL OR u.isEnabled = :isEnabled) AND " +
-            "(:roleName IS NULL OR r.name = :roleName)")
-    Page<User> findUsersByCriteriaWithRole(
-            @Param("email") String email,
-            @Param("userType") UserType userType,
-            @Param("subscriptionType") SubscriptionType subscriptionType,
-            @Param("isEnabled") Boolean isEnabled,
-            @Param("roleName") String roleName,
-            Pageable pageable);
-
-    /**
-     * Encuentra usuarios que pueden upgradear a PRO_SELLER
-     * (FREE+INDIVIDUAL y email verificado)
+     * Encuentra usuarios elegibles para upgrade a PRO_SELLER
      */
     @Query("SELECT u FROM User u WHERE " +
             "u.subscriptionType = 'FREE' AND " +
@@ -307,22 +182,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Page<User> findUsersEligibleForProSellerUpgrade(Pageable pageable);
 
     /**
-     * Cuenta usuarios elegibles para upgrade a PRO_SELLER
-     */
-    @Query("SELECT COUNT(u) FROM User u WHERE " +
-            "u.subscriptionType = 'FREE' AND " +
-            "u.userType = 'INDIVIDUAL' AND " +
-            "u.isEnabled = true AND " +
-            "u.emailVerifiedAt IS NOT NULL")
-    long countUsersEligibleForProSellerUpgrade();
-
-    // ===== MÉTODOS DE ESTADÍSTICAS POR ROLES =====
-
-    /**
      * Encuentra administradores elegibles para upgrade a PRO_SELLER
      */
-    @Query("SELECT u FROM User u JOIN u.roles r WHERE " +
-            "r.name = 'ROLE_ADMIN' AND " +
+    @Query("SELECT u FROM User u WHERE " +
+            "u.role.name = 'ROLE_ADMIN' AND " +
             "u.subscriptionType = 'FREE' AND " +
             "u.userType = 'INDIVIDUAL' AND " +
             "u.isEnabled = true AND " +
@@ -332,116 +195,107 @@ public interface UserRepository extends JpaRepository<User, Long> {
     /**
      * Encuentra usuarios regulares elegibles para upgrade a PRO_SELLER
      */
-    @Query("SELECT u FROM User u JOIN u.roles r WHERE " +
-            "r.name = 'ROLE_USER' AND " +
+    @Query("SELECT u FROM User u WHERE " +
+            "u.role.name = 'ROLE_USER' AND " +
             "u.subscriptionType = 'FREE' AND " +
             "u.userType = 'INDIVIDUAL' AND " +
             "u.isEnabled = true AND " +
-            "u.emailVerifiedAt IS NOT NULL AND " +
-            "NOT EXISTS (SELECT 1 FROM User u2 JOIN u2.roles r2 WHERE u2.id = u.id AND r2.name = 'ROLE_ADMIN')")
+            "u.emailVerifiedAt IS NOT NULL")
     Page<User> findRegularUsersEligibleForProSellerUpgrade(Pageable pageable);
 
-    // ===== MÉTODOS PARA GESTIÓN DE ROLES AVANZADA =====
+    // ===== MÉTODOS DE BÚSQUEDA AVANZADA =====
 
     /**
-     * Encuentra usuarios que solo tienen un rol específico
+     * Búsqueda combinada por rol, tipo de usuario y suscripción
      */
     @Query("SELECT u FROM User u WHERE " +
-            "SIZE(u.roles) = 1 AND " +
-            "EXISTS (SELECT 1 FROM User u2 JOIN u2.roles r WHERE u2.id = u.id AND r.name = :roleName)")
-    Page<User> findUsersWithOnlyRole(@Param("roleName") String roleName, Pageable pageable);
+            "(:roleName IS NULL OR u.role.name = :roleName) AND " +
+            "(:userType IS NULL OR u.userType = :userType) AND " +
+            "(:subscriptionType IS NULL OR u.subscriptionType = :subscriptionType)")
+    Page<User> findByAdvancedFilters(
+            @Param("roleName") String roleName,
+            @Param("userType") UserType userType,
+            @Param("subscriptionType") SubscriptionType subscriptionType,
+            Pageable pageable);
 
     /**
-     * Encuentra usuarios con múltiples roles
+     * Búsqueda combinada por rol, tipo de usuario, suscripción y estado activo
      */
-    @Query("SELECT u FROM User u WHERE SIZE(u.roles) > 1")
-    Page<User> findUsersWithMultipleRoles(Pageable pageable);
+    @Query("SELECT u FROM User u WHERE " +
+            "(:roleName IS NULL OR u.role.name = :roleName) AND " +
+            "(:userType IS NULL OR u.userType = :userType) AND " +
+            "(:subscriptionType IS NULL OR u.subscriptionType = :subscriptionType) AND " +
+            "(:activeOnly = false OR (u.isEnabled = true AND u.emailVerifiedAt IS NOT NULL))")
+    Page<User> findByAdvancedFiltersWithActiveStatus(
+            @Param("roleName") String roleName,
+            @Param("userType") UserType userType,
+            @Param("subscriptionType") SubscriptionType subscriptionType,
+            @Param("activeOnly") boolean activeOnly,
+            Pageable pageable);
 
-    /**
-     * Cuenta usuarios con múltiples roles
-     */
-    @Query("SELECT COUNT(u) FROM User u WHERE SIZE(u.roles) > 1")
-    long countUsersWithMultipleRoles();
-
-    /**
-     * Encuentra usuarios sin roles asignados (huérfanos)
-     */
-    @Query("SELECT u FROM User u WHERE SIZE(u.roles) = 0")
-    Page<User> findUsersWithoutRoles(Pageable pageable);
-
-    /**
-     * Cuenta usuarios sin roles asignados
-     */
-    @Query("SELECT COUNT(u) FROM User u WHERE SIZE(u.roles) = 0")
-    long countUsersWithoutRoles();
-
-    // ===== MÉTODOS DE REPORTES COMBINADOS =====
+    // ===== MÉTODOS DE REPORTES Y ESTADÍSTICAS =====
 
     /**
      * Obtiene distribución de usuarios por rol y tipo
      */
-    @Query("SELECT r.name, u.userType, u.subscriptionType, COUNT(u) " +
-            "FROM User u JOIN u.roles r " +
-            "GROUP BY r.name, u.userType, u.subscriptionType " +
-            "ORDER BY r.name, u.userType, u.subscriptionType")
-    List<Object[]> getUserDistributionByRoleAndType();
+    @Query("SELECT u.role.name, u.userType, u.subscriptionType, COUNT(u) " +
+            "FROM User u " +
+            "GROUP BY u.role.name, u.userType, u.subscriptionType " +
+            "ORDER BY u.role.name, u.userType, u.subscriptionType")
+    Object[] getUserDistributionStats();
 
     /**
-     * Obtiene estadísticas de actividad por rol
+     * Cuenta usuarios por rol y estado de verificación
      */
-    @Query("SELECT r.name, " +
-            "COUNT(u), " +
-            "SUM(CASE WHEN u.isEnabled = true THEN 1 ELSE 0 END), " +
-            "SUM(CASE WHEN u.emailVerifiedAt IS NOT NULL THEN 1 ELSE 0 END) " +
-            "FROM User u JOIN u.roles r " +
-            "GROUP BY r.name " +
-            "ORDER BY r.name")
-    List<Object[]> getActivityStatsByRole();
+    @Query("SELECT u.role.name, " +
+            "SUM(CASE WHEN u.emailVerifiedAt IS NOT NULL THEN 1 ELSE 0 END) as verified, " +
+            "SUM(CASE WHEN u.emailVerifiedAt IS NULL THEN 1 ELSE 0 END) as unverified " +
+            "FROM User u " +
+            "GROUP BY u.role.name")
+    Object[] getUserVerificationStatsByRole();
 
     /**
-     * Encuentra los últimos usuarios registrados por rol
+     * Cuenta usuarios activos por rol
      */
-    @Query("SELECT u FROM User u JOIN u.roles r WHERE r.name = :roleName " +
-            "ORDER BY u.createdAt DESC")
-    Page<User> findLatestUsersByRole(@Param("roleName") String roleName, Pageable pageable);
+    @Query("SELECT u.role.name, COUNT(u) " +
+            "FROM User u " +
+            "WHERE u.isEnabled = true AND u.emailVerifiedAt IS NOT NULL " +
+            "GROUP BY u.role.name")
+    Object[] getActiveUsersByRole();
+
+    // ===== MÉTODOS PARA VALIDACIONES DE SEGURIDAD =====
 
     /**
-     * Encuentra usuarios activos por rol y período
+     * Verifica si un usuario existe con un rol específico
      */
-    @Query("SELECT u FROM User u JOIN u.roles r WHERE " +
-            "r.name = :roleName AND " +
+    @Query("SELECT COUNT(u) > 0 FROM User u WHERE u.id = :userId AND u.role.name = :roleName")
+    boolean userExistsWithRole(@Param("userId") Long userId, @Param("roleName") String roleName);
+
+    /**
+     * Encuentra usuarios creados en un rango de fechas por rol
+     */
+    @Query("SELECT u FROM User u WHERE " +
+            "u.role.name = :roleName AND " +
+            "u.createdAt BETWEEN :startDate AND :endDate")
+    Page<User> findUsersByRoleAndDateRange(
+            @Param("roleName") String roleName,
+            @Param("startDate") java.time.LocalDateTime startDate,
+            @Param("endDate") java.time.LocalDateTime endDate,
+            Pageable pageable);
+
+    /**
+     * Cuenta el total de administradores en el sistema
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.role.name = 'ROLE_ADMIN'")
+    long countTotalAdmins();
+
+    /**
+     * Verifica si queda al menos un administrador activo (para prevenir bloqueo del sistema)
+     */
+    @Query("SELECT COUNT(u) > 0 FROM User u WHERE " +
+            "u.role.name = 'ROLE_ADMIN' AND " +
             "u.isEnabled = true AND " +
             "u.emailVerifiedAt IS NOT NULL AND " +
-            "u.createdAt >= :since " +
-            "ORDER BY u.createdAt DESC")
-    Page<User> findActiveUsersByRoleSince(@Param("roleName") String roleName,
-                                          @Param("since") java.time.LocalDateTime since,
-                                          Pageable pageable);
-
-    // ===== MÉTODOS DE VALIDACIÓN DE SEGURIDAD =====
-
-    /**
-     * Verifica si el usuario es el último administrador del sistema
-     */
-    @Query("SELECT CASE WHEN COUNT(u) = 1 THEN true ELSE false END " +
-            "FROM User u JOIN u.roles r WHERE r.name = 'ROLE_ADMIN' AND u.id = :userId")
-    boolean isLastAdmin(@Param("userId") Long userId);
-
-    /**
-     * Encuentra administradores activos (verificados y habilitados)
-     */
-    @Query("SELECT u FROM User u JOIN u.roles r WHERE " +
-            "r.name = 'ROLE_ADMIN' AND " +
-            "u.isEnabled = true AND " +
-            "u.emailVerifiedAt IS NOT NULL")
-    Page<User> findActiveAdmins(Pageable pageable);
-
-    /**
-     * Cuenta administradores activos
-     */
-    @Query("SELECT COUNT(u) FROM User u JOIN u.roles r WHERE " +
-            "r.name = 'ROLE_ADMIN' AND " +
-            "u.isEnabled = true AND " +
-            "u.emailVerifiedAt IS NOT NULL")
-    long countActiveAdmins();
+            "u.isAccountNonLocked = true")
+    boolean hasActiveAdmins();
 }

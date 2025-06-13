@@ -16,13 +16,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.util.Set;
 
 /**
- * DataInitializer CORREGIDO con lógica consistente:
- * - Solo crea usuarios FREE + INDIVIDUAL
- * - Solo crea usuarios PRO + PRO_SELLER
- * - Elimina combinaciones inconsistentes
+ * DataInitializer CORREGIDO para sistema de rol único inmutable:
+ * - Cada usuario tiene exactamente un rol
+ * - Los roles se asignan solo durante la creación
+ * - Solo crea usuarios FREE + INDIVIDUAL y PRO + PRO_SELLER
  */
 @Component
 @RequiredArgsConstructor
@@ -54,11 +53,11 @@ public class DataInitializer implements CommandLineRunner {
     @Transactional
     public void run(String... args) throws Exception {
         try {
-            log.info("Starting data initialization with CORRECTED user logic...");
+            log.info("Starting data initialization with IMMUTABLE ROLES system...");
 
             // 1. Crear roles si no existen
-            createRoleIfNotExists("ROLE_USER");
-            createRoleIfNotExists("ROLE_ADMIN");
+            createRoleIfNotExists("ROLE_USER", "Regular user role with standard access");
+            createRoleIfNotExists("ROLE_ADMIN", "Administrator role with full system access");
 
             // 2. Crear administrador por defecto si está habilitado
             if (createDefaultAdmin) {
@@ -70,23 +69,23 @@ public class DataInitializer implements CommandLineRunner {
                 createExampleUsers();
             }
 
-            log.info("Data initialization completed successfully with CORRECTED logic");
+            log.info("✅ Data initialization completed successfully with IMMUTABLE ROLES");
         } catch (Exception e) {
-            log.error("Error during data initialization: {}", e.getMessage(), e);
+            log.error("❌ Error during data initialization: {}", e.getMessage(), e);
         }
     }
 
-    private void createRoleIfNotExists(String roleName) {
+    private void createRoleIfNotExists(String roleName, String description) {
         try {
             if (roleRepository.findByName(roleName).isEmpty()) {
-                Role role = new Role(roleName);
+                Role role = new Role(roleName, description);
                 roleRepository.save(role);
-                log.info("Created role: {}", roleName);
+                log.info("✅ Created role: {} - {}", roleName, description);
             } else {
                 log.debug("Role already exists: {}", roleName);
             }
         } catch (Exception e) {
-            log.error("Error creating role {}: {}", roleName, e.getMessage());
+            log.error("❌ Error creating role {}: {}", roleName, e.getMessage());
         }
     }
 
@@ -109,24 +108,23 @@ public class DataInitializer implements CommandLineRunner {
             Role adminRole = roleRepository.findByName("ROLE_ADMIN")
                     .orElseThrow(() -> new RuntimeException("ROLE_ADMIN not found"));
 
-            // CORREGIDO: Admin creado como FREE + INDIVIDUAL (lógica consistente)
-            User defaultAdmin = User.builder()
-                    .firstName(defaultAdminFirstName)
-                    .lastName(defaultAdminLastName)
-                    .email(defaultAdminEmail)
-                    .password(passwordEncoder.encode(defaultAdminPassword))
-                    .roles(Set.of(adminRole))
-                    .isEnabled(true) // Admin pre-verificado
-                    .isAccountNonExpired(true)
-                    .isAccountNonLocked(true)
-                    .isCredentialsNonExpired(true)
-                    // LÓGICA CONSISTENTE: Admin empieza como FREE + INDIVIDUAL
-                    .userType(UserType.INDIVIDUAL)
-                    .subscriptionType(SubscriptionType.FREE)
-                    .phone("+34 600 000 000")
-                    .country("España")
-                    .city("Madrid")
-                    .build();
+            // CORREGIDO: Crear admin con constructor manual (sin .roles() ni .build())
+            User defaultAdmin = new User();
+            defaultAdmin.setFirstName(defaultAdminFirstName);
+            defaultAdmin.setLastName(defaultAdminLastName);
+            defaultAdmin.setEmail(defaultAdminEmail);
+            defaultAdmin.setPassword(passwordEncoder.encode(defaultAdminPassword));
+            defaultAdmin.setRole(adminRole); // CORREGIDO: Sin .roles()
+            defaultAdmin.setEnabled(true); // Admin pre-verificado
+            defaultAdmin.setAccountNonExpired(true);
+            defaultAdmin.setAccountNonLocked(true);
+            defaultAdmin.setCredentialsNonExpired(true);
+            // LÓGICA CONSISTENTE: Admin empieza como FREE + INDIVIDUAL
+            defaultAdmin.setUserType(UserType.INDIVIDUAL);
+            defaultAdmin.setSubscriptionType(SubscriptionType.FREE);
+            defaultAdmin.setPhone("+34 600 000 000");
+            defaultAdmin.setCountry("España");
+            defaultAdmin.setCity("Madrid");
 
             // Marcar como verificado
             defaultAdmin.markEmailAsVerified();
@@ -134,176 +132,151 @@ public class DataInitializer implements CommandLineRunner {
             User savedAdmin = userRepository.save(defaultAdmin);
 
             log.info("✅ Default administrator created successfully!");
-            log.info("📧 Email: {}", defaultAdminEmail);
-            log.info("🔑 Password: {} (CHANGE THIS IN PRODUCTION!)", defaultAdminPassword);
-            log.info("🆔 User ID: {}", savedAdmin.getId());
-            log.info("👤 User Type: {} (CORRECTED)", savedAdmin.getUserType());
-            log.info("💳 Subscription: {} (CORRECTED)", savedAdmin.getSubscriptionType());
+            log.info("📧 Email: {}", savedAdmin.getEmail());
+            log.info("🔐 Password: {} (change this in production!)", defaultAdminPassword);
+            log.info("👤 Role: {}", savedAdmin.getRoleName());
+            log.info("🎫 Tier: {} + {}", savedAdmin.getSubscriptionType(), savedAdmin.getUserType());
             log.info("🔧 Config Valid: {}", savedAdmin.isValidUserConfiguration());
 
-            // Warning de seguridad
-            if (isProductionEnvironment()) {
-                log.warn("⚠️  WARNING: Default admin created in PRODUCTION environment!");
-                log.warn("⚠️  IMMEDIATELY change the default password: {}", defaultAdminEmail);
-            }
-
         } catch (Exception e) {
-            log.error("Error creating default administrator: {}", e.getMessage(), e);
+            log.error("❌ Error creating default admin: {}", e.getMessage(), e);
         }
     }
 
-    /**
-     * Crea usuarios de ejemplo CORREGIDOS con lógica consistente
-     */
     private void createExampleUsers() {
         try {
-            log.info("Creating CORRECTED example users for development environment...");
+            log.info("Creating example users for development...");
 
+            // Obtener roles
             Role userRole = roleRepository.findByName("ROLE_USER")
                     .orElseThrow(() -> new RuntimeException("ROLE_USER not found"));
+            Role adminRole = roleRepository.findByName("ROLE_ADMIN")
+                    .orElseThrow(() -> new RuntimeException("ROLE_ADMIN not found"));
 
-            // 1. Usuario FREE + INDIVIDUAL verificado (CORRECTO)
-            createExampleUserIfNotExists(
-                    "user.free@figrclub.com",
-                    "Usuario",
-                    "Free",
-                    "FreeUser123!",
-                    userRole,
-                    UserType.INDIVIDUAL,
-                    SubscriptionType.FREE,
-                    true, // verificado
-                    "+34 600 111 111",
-                    "España",
-                    "Barcelona"
-            );
+            // 1. Usuario regular básico (FREE + INDIVIDUAL)
+            if (!userRepository.existsByEmail("user@example.com")) {
+                User regularUser = new User();
+                regularUser.setFirstName("Juan");
+                regularUser.setLastName("Pérez");
+                regularUser.setEmail("user@example.com");
+                regularUser.setPassword(passwordEncoder.encode("User123!"));
+                regularUser.setRole(userRole); // Rol único
+                regularUser.setUserType(UserType.INDIVIDUAL);
+                regularUser.setSubscriptionType(SubscriptionType.FREE);
+                regularUser.setEnabled(true);
+                regularUser.setAccountNonExpired(true);
+                regularUser.setAccountNonLocked(true);
+                regularUser.setCredentialsNonExpired(true);
+                regularUser.setPhone("+34 600 111 111");
+                regularUser.setCountry("España");
+                regularUser.setCity("Barcelona");
+                regularUser.setBirthDate(LocalDate.of(1990, 5, 15));
 
-            // 2. CORREGIDO: Usuario PRO + PRO_SELLER (antes era PRO + INDIVIDUAL)
-            User proSeller = createExampleUserIfNotExists(
-                    "seller.pro@figrclub.com",
-                    "Vendedor",
-                    "Profesional",
-                    "ProSeller123!",
-                    userRole,
-                    UserType.PRO_SELLER,
-                    SubscriptionType.PRO,
-                    true, // verificado
-                    "+34 600 333 333",
-                    "España",
-                    "Sevilla"
-            );
+                regularUser.markEmailAsVerified();
+                userRepository.save(regularUser);
+                log.info("✅ Created regular user: user@example.com (ROLE_USER + FREE + INDIVIDUAL)");
+            }
 
-            // Agregar información de negocio completa al vendedor profesional
-            if (proSeller != null) {
-                // Usar el método del dominio para mantener consistencia
+            // 2. Vendedor profesional (PRO + PRO_SELLER) con rol USER
+            if (!userRepository.existsByEmail("proseller@example.com")) {
+                User proSeller = new User();
+                proSeller.setFirstName("María");
+                proSeller.setLastName("García");
+                proSeller.setEmail("proseller@example.com");
+                proSeller.setPassword(passwordEncoder.encode("ProSeller123!"));
+                proSeller.setRole(userRole); // Rol USER, pero PRO_SELLER
+                proSeller.setUserType(UserType.PRO_SELLER);
+                proSeller.setSubscriptionType(SubscriptionType.PRO);
+                proSeller.setEnabled(true);
+                proSeller.setAccountNonExpired(true);
+                proSeller.setAccountNonLocked(true);
+                proSeller.setCredentialsNonExpired(true);
+                proSeller.setPhone("+34 600 222 222");
+                proSeller.setCountry("España");
+                proSeller.setCity("Madrid");
+                proSeller.setBirthDate(LocalDate.of(1985, 8, 22));
+
+                // Información de negocio
                 proSeller.updateBusinessInfo("TechStore Pro",
                         "Tienda especializada en tecnología y gadgets",
                         null);
-                proSeller.setFiscalAddress("Calle Tecnología 123, 41001 Sevilla, España");
+                proSeller.setFiscalAddress("Calle Tecnología 123, Madrid");
                 proSeller.setTaxId("B12345678");
-                proSeller.setPaymentMethod("STRIPE");
+                proSeller.setPaymentMethod("Transferencia bancaria");
+
+                proSeller.markEmailAsVerified();
                 userRepository.save(proSeller);
-                log.info("Business info added to Pro Seller: {} (PRO+PRO_SELLER)", proSeller.getEmail());
+                log.info("✅ Created pro seller: proseller@example.com (ROLE_USER + PRO + PRO_SELLER)");
             }
 
-            // 3. Usuario FREE + INDIVIDUAL no verificado (CORRECTO)
-            createExampleUserIfNotExists(
-                    "user.unverified@figrclub.com",
-                    "Usuario",
-                    "NoVerificado",
-                    "Unverified123!",
-                    userRole,
-                    UserType.INDIVIDUAL,
-                    SubscriptionType.FREE,
-                    false, // NO verificado
-                    null,
-                    null,
-                    null
-            );
+            // 3. Admin que también es Pro Seller (combinación válida)
+            if (!userRepository.existsByEmail("adminpro@example.com")) {
+                User adminProSeller = new User();
+                adminProSeller.setFirstName("Carlos");
+                adminProSeller.setLastName("Administrador");
+                adminProSeller.setEmail("adminpro@example.com");
+                adminProSeller.setPassword(passwordEncoder.encode("AdminPro123!"));
+                adminProSeller.setRole(adminRole); // Rol ADMIN y PRO_SELLER
+                adminProSeller.setUserType(UserType.PRO_SELLER);
+                adminProSeller.setSubscriptionType(SubscriptionType.PRO);
+                adminProSeller.setEnabled(true);
+                adminProSeller.setAccountNonExpired(true);
+                adminProSeller.setAccountNonLocked(true);
+                adminProSeller.setCredentialsNonExpired(true);
+                adminProSeller.setPhone("+34 600 333 333");
+                adminProSeller.setCountry("España");
+                adminProSeller.setCity("Valencia");
 
-            // 4. ELIMINADO: Usuario PRO + INDIVIDUAL (combinación incorrecta)
-            log.info("✅ CORRECTED example users created successfully!");
-            log.info("📋 Valid combinations only: FREE+INDIVIDUAL and PRO+PRO_SELLER");
+                // Información de negocio
+                adminProSeller.setBusinessName("AdminStore Enterprise");
+                adminProSeller.setBusinessDescription("Empresa de administración y ventas");
+                adminProSeller.setFiscalAddress("Avenida Admin 456, Valencia");
+                adminProSeller.setTaxId("B87654321");
+                adminProSeller.setPaymentMethod("Múltiples métodos");
+
+                adminProSeller.markEmailAsVerified();
+                userRepository.save(adminProSeller);
+                log.info("✅ Created admin pro seller: adminpro@example.com (ROLE_ADMIN + PRO + PRO_SELLER)");
+            }
+
+            // 4. Usuario regular para testing de upgrade
+            if (!userRepository.existsByEmail("upgrade@example.com")) {
+                User upgradeUser = new User();
+                upgradeUser.setFirstName("Ana");
+                upgradeUser.setLastName("Candidata");
+                upgradeUser.setEmail("upgrade@example.com");
+                upgradeUser.setPassword(passwordEncoder.encode("Upgrade123!"));
+                upgradeUser.setRole(userRole); // Rol USER
+                upgradeUser.setUserType(UserType.INDIVIDUAL);
+                upgradeUser.setSubscriptionType(SubscriptionType.FREE);
+                upgradeUser.setEnabled(true);
+                upgradeUser.setAccountNonExpired(true);
+                upgradeUser.setAccountNonLocked(true);
+                upgradeUser.setCredentialsNonExpired(true);
+                upgradeUser.setPhone("+34 600 444 444");
+                upgradeUser.setCountry("España");
+                upgradeUser.setCity("Sevilla");
+                upgradeUser.setBirthDate(LocalDate.of(1992, 12, 3));
+
+                upgradeUser.markEmailAsVerified();
+                userRepository.save(upgradeUser);
+                log.info("✅ Created upgrade candidate: upgrade@example.com (ROLE_USER + FREE + INDIVIDUAL)");
+            }
+
+            log.info("✅ Example users created successfully for development");
 
         } catch (Exception e) {
-            log.error("Error creating example users: {}", e.getMessage(), e);
+            log.error("❌ Error creating example users: {}", e.getMessage(), e);
         }
     }
 
-    private User createExampleUserIfNotExists(String email, String firstName, String lastName,
-                                              String password, Role role, UserType userType,
-                                              SubscriptionType subscriptionType, boolean verified,
-                                              String phone, String country, String city) {
-        try {
-            if (userRepository.existsByEmail(email)) {
-                log.debug("Example user already exists: {}", email);
-                return userRepository.findByEmail(email);
-            }
-
-            // VALIDACIÓN: Solo permitir combinaciones válidas
-            if (!isValidUserConfiguration(userType, subscriptionType)) {
-                log.error("❌ INVALID user configuration attempted: {}+{}. Skipping user: {}",
-                        subscriptionType, userType, email);
-                return null;
-            }
-
-            User user = User.builder()
-                    .firstName(firstName)
-                    .lastName(lastName)
-                    .email(email)
-                    .password(passwordEncoder.encode(password))
-                    .roles(Set.of(role))
-                    .userType(userType)
-                    .subscriptionType(subscriptionType)
-                    .isEnabled(verified)
-                    .isAccountNonExpired(true)
-                    .isAccountNonLocked(true)
-                    .isCredentialsNonExpired(true)
-                    .phone(phone)
-                    .country(country)
-                    .city(city)
-                    .birthDate(LocalDate.of(1990, 1, 1)) // Fecha de ejemplo
-                    .build();
-
-            if (verified) {
-                user.markEmailAsVerified();
-            }
-
-            User savedUser = userRepository.save(user);
-            log.info("✅ Created VALID example user: {} ({}+{})",
-                    email, subscriptionType, userType);
-            return savedUser;
-
-        } catch (Exception e) {
-            log.error("Error creating example user {}: {}", email, e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * VALIDACIÓN: Solo permite combinaciones válidas
-     */
-    private boolean isValidUserConfiguration(UserType userType, SubscriptionType subscriptionType) {
-        return (userType == UserType.INDIVIDUAL && subscriptionType == SubscriptionType.FREE) ||
-                (userType == UserType.PRO_SELLER && subscriptionType == SubscriptionType.PRO);
-    }
-
-    /**
-     * Detecta si estamos en un entorno de desarrollo
-     */
     private boolean isDevEnvironment() {
-        String activeProfiles = System.getProperty("spring.profiles.active");
-        return activeProfiles == null ||
-                activeProfiles.contains("dev") ||
-                activeProfiles.contains("development") ||
-                activeProfiles.isEmpty(); // Por defecto es desarrollo
-    }
-
-    /**
-     * Detecta si estamos en un entorno de producción
-     */
-    private boolean isProductionEnvironment() {
-        String activeProfiles = System.getProperty("spring.profiles.active");
-        return activeProfiles != null &&
-                (activeProfiles.contains("prod") || activeProfiles.contains("production"));
+        String[] activeProfiles = System.getProperty("spring.profiles.active", "").split(",");
+        for (String profile : activeProfiles) {
+            if ("dev".equalsIgnoreCase(profile.trim()) || "development".equalsIgnoreCase(profile.trim())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

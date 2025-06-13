@@ -31,20 +31,24 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 import static org.springframework.http.HttpStatus.*;
 
+/**
+ * Controlador de usuarios CORREGIDO con funcionalidad completa de roles y tiers
+ */
 @RequiredArgsConstructor
 @RestController
 @RequestMapping("${api.prefix}/users")
-@Tag(name = "User Management", description = "Operations related to user management and subscriptions")
+@Tag(name = "User Management", description = "Complete user management with roles and subscription tiers")
 @Validated
 @Slf4j
 public class UserController {
 
     private final IUserService userService;
 
-    // ===== ENDPOINTS EXISTENTES (MANTENIDOS) =====
+    // ===== ENDPOINTS BÁSICOS DE USUARIOS =====
 
     @GetMapping("/{userId}")
     @Operation(summary = "Get user by ID", description = "Retrieve a user by their unique identifier")
@@ -57,7 +61,18 @@ public class UserController {
             log.info("Fetching user with ID: {}", userId);
             User user = userService.getUserById(userId);
             UserDto userDto = userService.convertUserToDto(user);
-            return ResponseEntity.ok(new ApiResponse("User retrieved successfully", userDto));
+
+            // Información adicional sobre roles
+            Map<String, Object> response = new HashMap<>();
+            response.put("user", userDto);
+            response.put("roleInfo", Map.of(
+                    "isAdmin", user.isAdmin(),
+                    "roles", user.getRoles().stream().map(role -> role.getName()).toList(),
+                    "canPromoteToAdmin", !user.isAdmin() && userService.canPromoteToAdmin(userId),
+                    "canRevokeAdmin", user.isAdmin() && userService.canRevokeAdminPrivileges(userId)
+            ));
+
+            return ResponseEntity.ok(new ApiResponse("User retrieved successfully", response));
         } catch (ResourceNotFoundException e) {
             log.warn("User not found with ID: {}", userId);
             return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
@@ -69,7 +84,7 @@ public class UserController {
     }
 
     @GetMapping
-    @Operation(summary = "Get all users", description = "Retrieve all users with pagination and filtering")
+    @Operation(summary = "Get all users", description = "Retrieve all users with advanced filtering by roles and tiers")
     @SecurityRequirement(name = "bearerAuth")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> getAllUsers(
@@ -85,6 +100,8 @@ public class UserController {
             @RequestParam(required = false) SubscriptionType subscriptionType,
             @Parameter(description = "Filter by user type")
             @RequestParam(required = false) UserType userType,
+            @Parameter(description = "Filter by role")
+            @RequestParam(required = false) String role,
             @Parameter(description = "Show only active users")
             @RequestParam(defaultValue = "true") boolean activeOnly) {
 
@@ -95,12 +112,16 @@ public class UserController {
 
             Page<User> usersPage;
 
-            // Aplicar filtros según los parámetros
-            if (subscriptionType != null && userType != null) {
-                // Filtro combinado - implementar en repository si es necesario
+            // LÓGICA DE FILTRADO MEJORADA CON ROLES
+            if (role != null && !role.trim().isEmpty()) {
+                // Filtrar por rol específico
+                usersPage = userService.findUsersByRole(role, pageable);
+            } else if (subscriptionType != null && userType != null) {
+                // Filtro combinado - usar método de búsqueda básica
                 usersPage = activeOnly
                         ? userService.findActiveUsers(pageable)
                         : userService.findAllUsers(pageable);
+                // TODO: Implementar filtrado específico por combinación
             } else if (subscriptionType != null) {
                 usersPage = subscriptionType == SubscriptionType.PRO
                         ? userService.findProUsers(pageable)
@@ -126,7 +147,18 @@ public class UserController {
             response.put("filters", Map.of(
                     "subscriptionType", subscriptionType,
                     "userType", userType,
+                    "role", role != null ? role : "",
                     "activeOnly", activeOnly
+            ));
+
+            // Información adicional de distribución
+            UserService.UserStats stats = userService.getUserStats();
+            response.put("summary", Map.of(
+                    "totalUsers", stats.totalUsers(),
+                    "adminUsers", stats.adminUsers(),
+                    "regularUsers", stats.regularUsers(),
+                    "proUsers", stats.proUsers(),
+                    "freeUsers", stats.freeUsers()
             ));
 
             return ResponseEntity.ok(new ApiResponse("Users retrieved successfully", response));
@@ -138,13 +170,31 @@ public class UserController {
     }
 
     @GetMapping("/me")
-    @Operation(summary = "Get current user", description = "Retrieve the currently authenticated user")
+    @Operation(summary = "Get current user", description = "Retrieve the currently authenticated user with role information")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<ApiResponse> getCurrentUser() {
         try {
             User user = userService.getAuthenticatedUser();
             UserDto userDto = userService.convertUserToDto(user);
-            return ResponseEntity.ok(new ApiResponse("Current user retrieved successfully", userDto));
+
+            // Información adicional sobre el usuario actual
+            Map<String, Object> response = new HashMap<>();
+            response.put("user", userDto);
+            response.put("permissions", Map.of(
+                    "isAdmin", user.isAdmin(),
+                    "canAccessAdminPanel", user.isAdmin(),
+                    "canManageUsers", user.isAdmin(),
+                    "canUpgradeToProSeller", userService.canUpgradeToProSeller(user.getId()),
+                    "canAccessProFeatures", user.canAccessProFeatures()
+            ));
+            response.put("accountInfo", Map.of(
+                    "tier", user.getSubscriptionType() + "+" + user.getUserType(),
+                    "isValidConfiguration", user.isValidUserConfiguration(),
+                    "emailVerified", user.isEmailVerified(),
+                    "accountStatus", user.isAccountFullyActive() ? "ACTIVE" : "INACTIVE"
+            ));
+
+            return ResponseEntity.ok(new ApiResponse("Current user retrieved successfully", response));
         } catch (ResourceNotFoundException e) {
             return ResponseEntity.status(UNAUTHORIZED).body(new ApiResponse(e.getMessage(), null));
         } catch (Exception e) {
@@ -154,7 +204,92 @@ public class UserController {
         }
     }
 
-    // ===== NUEVOS ENDPOINTS PARA UPGRADE DE USUARIOS =====
+    // ===== ENDPOINTS DE CREACIÓN MEJORADOS =====
+
+    @PostMapping("/admin/add")
+    @Operation(summary = "Create user (Admin only)", description = "Admin creates a user with optional role assignment")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> adminCreateUser(
+            @Valid @RequestBody CreateUserRequest request,
+            @Parameter(description = "Assign admin role")
+            @RequestParam(defaultValue = "false") boolean makeAdmin,
+            @Parameter(description = "Create pre-verified")
+            @RequestParam(defaultValue = "true") boolean preVerified) {
+        try {
+            log.info("Admin creating user with email: {} (admin: {}, verified: {})",
+                    request.getEmail(), makeAdmin, preVerified);
+
+            User user;
+            if (makeAdmin) {
+                user = preVerified ?
+                        createVerifiedAdminUser(request) :
+                        userService.createAdminUser(request);
+            } else {
+                user = preVerified ?
+                        userService.createVerifiedUser(request) :
+                        userService.createUser(request);
+            }
+
+            UserDto userDto = userService.convertUserToDto(user);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("user", userDto);
+            response.put("creationInfo", Map.of(
+                    "wasAssignedAdminRole", makeAdmin,
+                    "wasPreVerified", preVerified,
+                    "initialTier", user.getSubscriptionType() + "+" + user.getUserType()
+            ));
+
+            return ResponseEntity.status(CREATED)
+                    .body(new ApiResponse("User created successfully!", response));
+        } catch (AlreadyExistsException e) {
+            log.warn("Admin attempt to create user with existing email: {}", request.getEmail());
+            return ResponseEntity.status(CONFLICT).body(new ApiResponse(e.getMessage(), null));
+        } catch (Exception e) {
+            log.error("Error in admin user creation", e);
+            return ResponseEntity.status(BAD_REQUEST)
+                    .body(new ApiResponse("Error creating user", null));
+        }
+    }
+
+    private User createVerifiedAdminUser(CreateUserRequest request) {
+        User user = userService.createAdminUser(request);
+        user.markEmailAsVerified();
+        return user;
+    }
+
+    @PostMapping("/admin/create-with-roles")
+    @Operation(summary = "Create user with specific roles", description = "Create user with custom role assignment")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> createUserWithRoles(
+            @Valid @RequestBody CreateUserRequest request,
+            @Parameter(description = "Roles to assign")
+            @RequestParam Set<String> roles,
+            @Parameter(description = "Create pre-verified")
+            @RequestParam(defaultValue = "false") boolean preVerified) {
+        try {
+            log.info("Admin creating user with email: {} and roles: {}", request.getEmail(), roles);
+
+            User user = userService.createUserWithRoles(request, roles);
+
+            if (preVerified) {
+                user.markEmailAsVerified();
+            }
+
+            UserDto userDto = userService.convertUserToDto(user);
+
+            return ResponseEntity.status(CREATED)
+                    .body(new ApiResponse("User created with custom roles successfully!", userDto));
+        } catch (Exception e) {
+            log.error("Error creating user with custom roles", e);
+            return ResponseEntity.status(BAD_REQUEST)
+                    .body(new ApiResponse("Error creating user with roles", null));
+        }
+    }
+
+    // ===== ENDPOINTS DE UPGRADE (EXISTENTES) =====
 
     @PostMapping("/{userId}/upgrade-to-pro-seller")
     @Operation(summary = "Upgrade to Pro Seller", description = "Upgrade user to Pro Seller with business information")
@@ -188,35 +323,200 @@ public class UserController {
         }
     }
 
-    @PostMapping("/{userId}/upgrade-subscription")
-    @Operation(summary = "Upgrade subscription to PRO", description = "Upgrade user subscription to PRO")
-    @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasRole('ADMIN') or @userService.getAuthenticatedUser().id == #userId")
-    public ResponseEntity<ApiResponse> upgradeSubscriptionToPro(
-            @PathVariable Long userId,
-            @Valid @RequestBody UpgradeToProSellerRequest request) {
-        try {
-            log.info("Upgrading subscription to PRO for user {}", userId);
+    // ===== ENDPOINTS DE INFORMACIÓN MEJORADOS =====
 
-            if (!userService.canUpgradeSubscription(userId)) {
-                return ResponseEntity.status(BAD_REQUEST)
-                        .body(new ApiResponse("User subscription cannot be upgraded", null));
+    @GetMapping("/stats")
+    @Operation(summary = "Get comprehensive user statistics", description = "Get detailed statistics including roles and tiers")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> getDetailedUserStats() {
+        try {
+            log.info("Retrieving detailed user statistics");
+
+            UserService.UserStats userStats = userService.getUserStats();
+            UserService.RoleStats roleStats = userService.getRoleStats();
+            UserService.CompleteDistribution distribution = userService.getCompleteDistribution();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("userStats", userStats);
+            response.put("roleStats", roleStats);
+            response.put("distribution", distribution.configurationDistribution());
+
+            // Análisis y métricas calculadas
+            Map<String, Object> analysis = new HashMap<>();
+            if (userStats.totalUsers() > 0) {
+                analysis.put("verificationRate", (double) userStats.verifiedUsers() / userStats.totalUsers() * 100);
+                analysis.put("proConversionRate", (double) userStats.proUsers() / userStats.totalUsers() * 100);
+                analysis.put("adminRatio", (double) roleStats.adminUsers() / userStats.totalUsers() * 100);
+                analysis.put("proSellerAdminRatio", roleStats.adminUsers() > 0 ?
+                        (double) roleStats.adminProSellers() / roleStats.adminUsers() * 100 : 0);
+            }
+            response.put("analysis", analysis);
+
+            // Salud del sistema
+            Map<String, Object> systemHealth = new HashMap<>();
+            systemHealth.put("hasAdmins", roleStats.adminUsers() > 0);
+            systemHealth.put("adminCount", roleStats.adminUsers());
+            systemHealth.put("configurationConsistency",
+                    distribution.configurationDistribution().get("FREE+INDIVIDUAL") +
+                            distribution.configurationDistribution().get("PRO+PRO_SELLER") == userStats.totalUsers());
+            response.put("systemHealth", systemHealth);
+
+            return ResponseEntity.ok(new ApiResponse("Detailed statistics retrieved successfully", response));
+        } catch (Exception e) {
+            log.error("Error retrieving detailed statistics", e);
+            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error retrieving detailed statistics", null));
+        }
+    }
+
+    @GetMapping("/search")
+    @Operation(summary = "Advanced user search", description = "Search users with advanced filtering by roles, tiers, and other criteria")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> searchUsers(
+            @Parameter(description = "Search term (name, email, business name)")
+            @RequestParam(required = false) String searchTerm,
+            @Parameter(description = "Role filter (ROLE_USER, ROLE_ADMIN)")
+            @RequestParam(required = false) String role,
+            @Parameter(description = "Subscription type filter")
+            @RequestParam(required = false) SubscriptionType subscriptionType,
+            @Parameter(description = "User type filter")
+            @RequestParam(required = false) UserType userType,
+            @Parameter(description = "Only verified users")
+            @RequestParam(defaultValue = "false") boolean verifiedOnly,
+            @Parameter(description = "Only active users")
+            @RequestParam(defaultValue = "false") boolean activeOnly,
+            @Parameter(description = "Page number (0-based)")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size")
+            @RequestParam(defaultValue = "10") int size) {
+        try {
+            log.info("Advanced search: term={}, role={}, subscription={}, userType={}",
+                    searchTerm, role, subscriptionType, userType);
+
+            Pageable pageable = PageRequest.of(page, size, Sort.by("firstName", "lastName"));
+            Page<User> usersPage;
+
+            // Lógica de búsqueda inteligente
+            if (searchTerm != null && !searchTerm.trim().isEmpty()) {
+                usersPage = userService.searchUsers(searchTerm, pageable);
+            } else if (role != null && !role.trim().isEmpty()) {
+                usersPage = userService.findUsersByRole(role, pageable);
+            } else if (subscriptionType != null) {
+                usersPage = subscriptionType == SubscriptionType.PRO
+                        ? userService.findProUsers(pageable)
+                        : userService.findFreeUsers(pageable);
+            } else if (userType != null) {
+                usersPage = userType == UserType.PRO_SELLER
+                        ? userService.findProSellers(pageable)
+                        : userService.findIndividualUsers(pageable);
+            } else {
+                usersPage = activeOnly ?
+                        userService.findActiveUsers(pageable) :
+                        (verifiedOnly ? userService.findVerifiedUsers(pageable) : userService.findAllUsers(pageable));
             }
 
-            User user = userService.upgradeToProSeller(userId, request);
+            Page<UserDto> userDtoPage = usersPage.map(userService::convertUserToDto);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("users", userDtoPage.getContent());
+            response.put("currentPage", userDtoPage.getNumber());
+            response.put("totalItems", userDtoPage.getTotalElements());
+            response.put("totalPages", userDtoPage.getTotalPages());
+            response.put("pageSize", userDtoPage.getSize());
+            response.put("searchCriteria", Map.of(
+                    "searchTerm", searchTerm != null ? searchTerm : "",
+                    "role", role != null ? role : "",
+                    "subscriptionType", subscriptionType != null ? subscriptionType.toString() : "",
+                    "userType", userType != null ? userType.toString() : "",
+                    "verifiedOnly", verifiedOnly,
+                    "activeOnly", activeOnly
+            ));
+
+            return ResponseEntity.ok(new ApiResponse("Advanced search completed successfully", response));
+        } catch (Exception e) {
+            log.error("Error in advanced search", e);
+            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error in advanced search", null));
+        }
+    }
+
+    // ===== ENDPOINTS DE GESTIÓN DE ROLES BÁSICOS =====
+
+    @PostMapping("/{userId}/roles/assign/{roleName}")
+    @Operation(summary = "Assign role to user", description = "Assign a specific role to a user (Admin only)")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> assignRole(
+            @PathVariable Long userId,
+            @PathVariable String roleName) {
+        try {
+            log.info("Assigning role {} to user {}", roleName, userId);
+
+            User user = userService.assignRoleToUser(userId, roleName);
             UserDto userDto = userService.convertUserToDto(user);
 
-            return ResponseEntity.ok(new ApiResponse("Subscription upgraded to PRO successfully", userDto));
+            return ResponseEntity.ok(new ApiResponse(
+                    String.format("Role %s assigned successfully", roleName), userDto));
+        } catch (Exception e) {
+            log.error("Error assigning role {} to user {}", roleName, userId, e);
+            return ResponseEntity.status(BAD_REQUEST)
+                    .body(new ApiResponse("Error assigning role", null));
+        }
+    }
+
+    @DeleteMapping("/{userId}/roles/remove/{roleName}")
+    @Operation(summary = "Remove role from user", description = "Remove a specific role from a user (Admin only)")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse> removeRole(
+            @PathVariable Long userId,
+            @PathVariable String roleName) {
+        try {
+            log.info("Removing role {} from user {}", roleName, userId);
+
+            User user = userService.removeRoleFromUser(userId, roleName);
+            UserDto userDto = userService.convertUserToDto(user);
+
+            return ResponseEntity.ok(new ApiResponse(
+                    String.format("Role %s removed successfully", roleName), userDto));
         } catch (IllegalStateException e) {
-            log.warn("Subscription upgrade failed for user {}: {}", userId, e.getMessage());
-            return ResponseEntity.status(CONFLICT).body(new ApiResponse(e.getMessage(), null));
+            log.warn("Cannot remove role {} from user {}: {}", roleName, userId, e.getMessage());
+            return ResponseEntity.status(CONFLICT)
+                    .body(new ApiResponse(e.getMessage(), null));
+        } catch (Exception e) {
+            log.error("Error removing role {} from user {}", roleName, userId, e);
+            return ResponseEntity.status(BAD_REQUEST)
+                    .body(new ApiResponse("Error removing role", null));
+        }
+    }
+
+    // ===== ENDPOINTS DE ACTUALIZACIÓN (EXISTENTES MEJORADOS) =====
+
+    @PutMapping("/{userId}")
+    @Operation(summary = "Update user", description = "Update user information (preserves roles)")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN') or @userService.getAuthenticatedUser().id == #userId")
+    public ResponseEntity<ApiResponse> updateUser(
+            @Valid @RequestBody UserUpdateRequest request,
+            @PathVariable Long userId) {
+        try {
+            log.info("Updating user with ID: {}", userId);
+            User user = userService.updateUser(request, userId);
+            UserDto userDto = userService.convertUserToDto(user);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("user", userDto);
+            response.put("preservedRoles", user.getRoles().stream().map(role -> role.getName()).toList());
+
+            return ResponseEntity.ok(new ApiResponse("User updated successfully!", response));
         } catch (ResourceNotFoundException e) {
-            log.warn("User not found for subscription upgrade: {}", userId);
+            log.warn("Attempt to update non-existent user: {}", userId);
             return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
         } catch (Exception e) {
-            log.error("Error upgrading subscription for user {}", userId, e);
-            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
-                    .body(new ApiResponse("Error upgrading subscription", null));
+            log.error("Error updating user with ID: {}", userId, e);
+            return ResponseEntity.status(BAD_REQUEST).body(new ApiResponse("Error updating user", null));
         }
     }
 
@@ -234,12 +534,6 @@ public class UserController {
             UserDto userDto = userService.convertUserToDto(user);
 
             return ResponseEntity.ok(new ApiResponse("Contact information updated successfully", userDto));
-        } catch (IllegalArgumentException e) {
-            log.warn("Invalid contact info for user {}: {}", userId, e.getMessage());
-            return ResponseEntity.status(BAD_REQUEST).body(new ApiResponse(e.getMessage(), null));
-        } catch (ResourceNotFoundException e) {
-            log.warn("User not found for contact update: {}", userId);
-            return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
         } catch (Exception e) {
             log.error("Error updating contact info for user {}", userId, e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR)
@@ -264,9 +558,6 @@ public class UserController {
         } catch (IllegalStateException e) {
             log.warn("Business info update failed for user {}: {}", userId, e.getMessage());
             return ResponseEntity.status(BAD_REQUEST).body(new ApiResponse(e.getMessage(), null));
-        } catch (ResourceNotFoundException e) {
-            log.warn("User not found for business update: {}", userId);
-            return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
         } catch (Exception e) {
             log.error("Error updating business info for user {}", userId, e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR)
@@ -274,111 +565,31 @@ public class UserController {
         }
     }
 
-    // ===== ENDPOINTS DE INFORMACIÓN =====
-
-    @GetMapping("/{userId}/subscription-info")
-    @Operation(summary = "Get subscription information", description = "Get detailed subscription information for a user")
-    @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasRole('ADMIN') or @userService.getAuthenticatedUser().id == #userId")
-    public ResponseEntity<ApiResponse> getSubscriptionInfo(@PathVariable Long userId) {
-        try {
-            log.debug("Getting subscription info for user {}", userId);
-
-            UserService.UserSubscriptionInfo subscriptionInfo = userService.getSubscriptionInfo(userId);
-
-            return ResponseEntity.ok(new ApiResponse("Subscription information retrieved successfully", subscriptionInfo));
-        } catch (ResourceNotFoundException e) {
-            log.warn("User not found for subscription info: {}", userId);
-            return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
-        } catch (Exception e) {
-            log.error("Error getting subscription info for user {}", userId, e);
-            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
-                    .body(new ApiResponse("Error retrieving subscription information", null));
-        }
-    }
-
-    @GetMapping("/{userId}/upgrade-eligibility")
-    @Operation(summary = "Check upgrade eligibility", description = "Check if user can upgrade to Pro Seller or PRO subscription")
-    @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasRole('ADMIN') or @userService.getAuthenticatedUser().id == #userId")
-    public ResponseEntity<ApiResponse> getUpgradeEligibility(@PathVariable Long userId) {
-        try {
-            log.debug("Checking upgrade eligibility for user {}", userId);
-
-            boolean canUpgradeToProSeller = userService.canUpgradeToProSeller(userId);
-            boolean canUpgradeSubscription = userService.canUpgradeSubscription(userId);
-
-            Map<String, Object> eligibility = new HashMap<>();
-            eligibility.put("canUpgradeToProSeller", canUpgradeToProSeller);
-            eligibility.put("canUpgradeSubscription", canUpgradeSubscription);
-            eligibility.put("userId", userId);
-
-            return ResponseEntity.ok(new ApiResponse("Upgrade eligibility checked successfully", eligibility));
-        } catch (Exception e) {
-            log.error("Error checking upgrade eligibility for user {}", userId, e);
-            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
-                    .body(new ApiResponse("Error checking upgrade eligibility", null));
-        }
-    }
-
-    // ===== ENDPOINTS EXISTENTES (MANTENIDOS CON MODIFICACIONES MENORES) =====
-
-    @PostMapping("/admin/add")
-    @Operation(summary = "Create user (Admin only)", description = "Admin creates a pre-verified user")
-    @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse> adminCreateUser(@Valid @RequestBody CreateUserRequest request) {
-        try {
-            log.info("Admin creating pre-verified user with email: {}", request.getEmail());
-
-            User user = userService.createVerifiedUser(request);
-            UserDto userDto = userService.convertUserToDto(user);
-
-            return ResponseEntity.status(CREATED)
-                    .body(new ApiResponse("User created and verified successfully!", userDto));
-        } catch (AlreadyExistsException e) {
-            log.warn("Admin attempt to create user with existing email: {}", request.getEmail());
-            return ResponseEntity.status(CONFLICT).body(new ApiResponse(e.getMessage(), null));
-        } catch (Exception e) {
-            log.error("Error in admin user creation", e);
-            return ResponseEntity.status(BAD_REQUEST)
-                    .body(new ApiResponse("Error creating user", null));
-        }
-    }
-
-    @PutMapping("/{userId}")
-    @Operation(summary = "Update user", description = "Update user information")
-    @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasRole('ADMIN') or @userService.getAuthenticatedUser().id == #userId")
-    public ResponseEntity<ApiResponse> updateUser(
-            @Valid @RequestBody UserUpdateRequest request,
-            @PathVariable Long userId) {
-        try {
-            log.info("Updating user with ID: {}", userId);
-            User user = userService.updateUser(request, userId);
-            UserDto userDto = userService.convertUserToDto(user);
-            return ResponseEntity.ok(new ApiResponse("User updated successfully!", userDto));
-        } catch (ResourceNotFoundException e) {
-            log.warn("Attempt to update non-existent user: {}", userId);
-            return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
-        } catch (Exception e) {
-            log.error("Error updating user with ID: {}", userId, e);
-            return ResponseEntity.status(BAD_REQUEST).body(new ApiResponse("Error updating user", null));
-        }
-    }
+    // ===== ENDPOINTS DE ELIMINACIÓN Y ACTIVACIÓN =====
 
     @DeleteMapping("/{userId}")
-    @Operation(summary = "Delete user", description = "Permanently delete a user")
+    @Operation(summary = "Delete user", description = "Permanently delete a user (checks admin constraints)")
     @SecurityRequirement(name = "bearerAuth")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> deleteUser(@PathVariable Long userId) {
         try {
             log.info("Deleting user with ID: {}", userId);
+
+            // Verificación adicional para administradores
+            User user = userService.getUserById(userId);
+            if (user.isAdmin() && !userService.canRevokeAdminPrivileges(userId)) {
+                return ResponseEntity.status(CONFLICT)
+                        .body(new ApiResponse("Cannot delete user: is the last administrator in the system", null));
+            }
+
             userService.deleteUser(userId);
             return ResponseEntity.ok(new ApiResponse("User deleted successfully!", null));
         } catch (ResourceNotFoundException e) {
             log.warn("Attempt to delete non-existent user: {}", userId);
             return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
+        } catch (IllegalStateException e) {
+            log.warn("Cannot delete user {}: {}", userId, e.getMessage());
+            return ResponseEntity.status(CONFLICT).body(new ApiResponse(e.getMessage(), null));
         } catch (Exception e) {
             log.error("Error deleting user with ID: {}", userId, e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR).body(new ApiResponse("Error deleting user", null));
@@ -395,9 +606,6 @@ public class UserController {
             User user = userService.deactivateUser(userId);
             UserDto userDto = userService.convertUserToDto(user);
             return ResponseEntity.ok(new ApiResponse("User deactivated successfully!", userDto));
-        } catch (ResourceNotFoundException e) {
-            log.warn("Attempt to deactivate non-existent user: {}", userId);
-            return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
         } catch (Exception e) {
             log.error("Error deactivating user with ID: {}", userId, e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR).body(new ApiResponse("Error deactivating user", null));
@@ -414,14 +622,13 @@ public class UserController {
             User user = userService.activateUser(userId);
             UserDto userDto = userService.convertUserToDto(user);
             return ResponseEntity.ok(new ApiResponse("User activated successfully!", userDto));
-        } catch (ResourceNotFoundException e) {
-            log.warn("Attempt to activate non-existent user: {}", userId);
-            return ResponseEntity.status(NOT_FOUND).body(new ApiResponse(e.getMessage(), null));
         } catch (Exception e) {
             log.error("Error activating user with ID: {}", userId, e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR).body(new ApiResponse("Error activating user", null));
         }
     }
+
+    // ===== ENDPOINTS DE UTILIDAD =====
 
     @GetMapping("/check-email")
     @Operation(summary = "Check email availability", description = "Check if an email is already registered")
@@ -447,76 +654,71 @@ public class UserController {
         }
     }
 
-    @GetMapping("/stats")
-    @Operation(summary = "Get user statistics", description = "Get comprehensive user statistics (Admin only)")
+    @GetMapping("/{userId}/subscription-info")
+    @Operation(summary = "Get subscription information", description = "Get detailed subscription and role information for a user")
     @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse> getUserStats() {
+    @PreAuthorize("hasRole('ADMIN') or @userService.getAuthenticatedUser().id == #userId")
+    public ResponseEntity<ApiResponse> getSubscriptionInfo(@PathVariable Long userId) {
         try {
-            log.info("Retrieving user statistics");
-            var stats = userService.getUserStats();
+            log.debug("Getting subscription info for user {}", userId);
+
+            UserService.UserSubscriptionInfo subscriptionInfo = userService.getSubscriptionInfo(userId);
+            User user = userService.getUserById(userId);
 
             Map<String, Object> response = new HashMap<>();
-            response.put("totalUsers", stats.totalUsers());
-            response.put("verifiedUsers", stats.verifiedUsers());
-            response.put("unverifiedUsers", stats.unverifiedUsers());
-            response.put("proUsers", stats.proUsers());
-            response.put("freeUsers", stats.freeUsers());
-            response.put("proSellers", stats.proSellers());
-            response.put("individualUsers", stats.individualUsers());
+            response.put("subscriptionInfo", subscriptionInfo);
+            response.put("roleInfo", Map.of(
+                    "roles", user.getRoles().stream().map(role -> role.getName()).toList(),
+                    "isAdmin", user.isAdmin(),
+                    "permissions", Map.of(
+                            "canAccessAdminPanel", user.isAdmin(),
+                            "canManageUsers", user.isAdmin(),
+                            "canAccessProFeatures", user.canAccessProFeatures()
+                    )
+            ));
 
-            // Calcular tasas
-            response.put("verificationRate", stats.totalUsers() > 0 ?
-                    (double) stats.verifiedUsers() / stats.totalUsers() * 100 : 0.0);
-            response.put("proConversionRate", stats.totalUsers() > 0 ?
-                    (double) stats.proUsers() / stats.totalUsers() * 100 : 0.0);
-            response.put("proSellerRate", stats.totalUsers() > 0 ?
-                    (double) stats.proSellers() / stats.totalUsers() * 100 : 0.0);
-
-            return ResponseEntity.ok(new ApiResponse("User statistics retrieved successfully", response));
+            return ResponseEntity.ok(new ApiResponse("Subscription information retrieved successfully", response));
         } catch (Exception e) {
-            log.error("Error retrieving user statistics", e);
+            log.error("Error getting subscription info for user {}", userId, e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR)
-                    .body(new ApiResponse("Error retrieving user statistics", null));
+                    .body(new ApiResponse("Error retrieving subscription information", null));
         }
     }
 
-    @GetMapping("/search")
-    @Operation(summary = "Search users", description = "Search users by name, email, or business name (Admin only)")
+    @GetMapping("/{userId}/upgrade-eligibility")
+    @Operation(summary = "Check upgrade eligibility", description = "Check if user can upgrade to Pro Seller")
     @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse> searchUsers(
-            @Parameter(description = "Search term")
-            @RequestParam @NotBlank(message = "Search term is required") String searchTerm,
-            @Parameter(description = "Page number (0-based)")
-            @RequestParam(defaultValue = "0") int page,
-            @Parameter(description = "Page size")
-            @RequestParam(defaultValue = "10") int size) {
+    @PreAuthorize("hasRole('ADMIN') or @userService.getAuthenticatedUser().id == #userId")
+    public ResponseEntity<ApiResponse> getUpgradeEligibility(@PathVariable Long userId) {
         try {
-            log.info("Searching users with term: {}", searchTerm);
+            log.debug("Checking upgrade eligibility for user {}", userId);
 
-            Pageable pageable = PageRequest.of(page, size, Sort.by("firstName", "lastName"));
-            Page<User> usersPage = userService.searchUsers(searchTerm, pageable);
-            Page<UserDto> userDtoPage = usersPage.map(userService::convertUserToDto);
+            boolean canUpgradeToProSeller = userService.canUpgradeToProSeller(userId);
+            User user = userService.getUserById(userId);
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("users", userDtoPage.getContent());
-            response.put("currentPage", userDtoPage.getNumber());
-            response.put("totalItems", userDtoPage.getTotalElements());
-            response.put("totalPages", userDtoPage.getTotalPages());
-            response.put("pageSize", userDtoPage.getSize());
-            response.put("searchTerm", searchTerm);
+            Map<String, Object> eligibility = new HashMap<>();
+            eligibility.put("userId", userId);
+            eligibility.put("canUpgradeToProSeller", canUpgradeToProSeller);
+            eligibility.put("currentTier", user.getSubscriptionType() + "+" + user.getUserType());
+            eligibility.put("isValidConfiguration", user.isValidUserConfiguration());
+            eligibility.put("requirements", Map.of(
+                    "mustBeFreeIndividual", user.isFreeIndividual(),
+                    "mustBeEmailVerified", user.isEmailVerified(),
+                    "accountMustBeActive", user.isAccountFullyActive()
+            ));
 
-            return ResponseEntity.ok(new ApiResponse("Search completed successfully", response));
+            return ResponseEntity.ok(new ApiResponse("Upgrade eligibility checked successfully", eligibility));
         } catch (Exception e) {
-            log.error("Error searching users with term: {}", searchTerm, e);
+            log.error("Error checking upgrade eligibility for user {}", userId, e);
             return ResponseEntity.status(INTERNAL_SERVER_ERROR)
-                    .body(new ApiResponse("Error searching users", null));
+                    .body(new ApiResponse("Error checking upgrade eligibility", null));
         }
     }
+
+    // ===== ENDPOINTS DE EXPORTACIÓN Y REPORTES =====
 
     @GetMapping("/export")
-    @Operation(summary = "Export users", description = "Export user list with filtering options (Admin only)")
+    @Operation(summary = "Export users", description = "Export user list with comprehensive filtering options")
     @SecurityRequirement(name = "bearerAuth")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> exportUsers(
@@ -527,16 +729,21 @@ public class UserController {
             @Parameter(description = "Filter by subscription type")
             @RequestParam(required = false) SubscriptionType subscriptionType,
             @Parameter(description = "Filter by user type")
-            @RequestParam(required = false) UserType userType) {
+            @RequestParam(required = false) UserType userType,
+            @Parameter(description = "Filter by role")
+            @RequestParam(required = false) String role,
+            @Parameter(description = "Include role information")
+            @RequestParam(defaultValue = "true") boolean includeRoles) {
         try {
-            log.info("Exporting users in format: {}, activeOnly: {}, subscriptionType: {}, userType: {}",
-                    format, activeOnly, subscriptionType, userType);
+            log.info("Exporting users: format={}, activeOnly={}, role={}", format, activeOnly, role);
 
-            Pageable pageable = PageRequest.of(0, 1000, Sort.by("firstName", "lastName"));
+            Pageable pageable = PageRequest.of(0, 10000, Sort.by("firstName", "lastName")); // Export limit
             Page<User> usersPage;
 
-            // Aplicar filtros
-            if (subscriptionType != null) {
+            // Aplicar filtros de exportación
+            if (role != null && !role.trim().isEmpty()) {
+                usersPage = userService.findUsersByRole(role, pageable);
+            } else if (subscriptionType != null) {
                 usersPage = subscriptionType == SubscriptionType.PRO
                         ? userService.findProUsers(pageable)
                         : userService.findFreeUsers(pageable);
@@ -562,8 +769,16 @@ public class UserController {
             response.put("filters", Map.of(
                     "activeOnly", activeOnly,
                     "subscriptionType", subscriptionType,
-                    "userType", userType
+                    "userType", userType,
+                    "role", role != null ? role : "",
+                    "includeRoles", includeRoles
             ));
+
+            // Información adicional de estadísticas en la exportación
+            if (includeRoles) {
+                UserService.CompleteDistribution distribution = userService.getCompleteDistribution();
+                response.put("distributionSummary", distribution);
+            }
 
             return ResponseEntity.ok(new ApiResponse("Users exported successfully", response));
         } catch (Exception e) {

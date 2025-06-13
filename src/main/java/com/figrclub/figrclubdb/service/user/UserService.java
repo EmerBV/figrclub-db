@@ -36,12 +36,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
- * Servicio de usuarios corregido con lógica consistente:
- * - Solo permite FREE + INDIVIDUAL
- * - Solo permite PRO + PRO_SELLER
- * - Elimina métodos que permitían combinaciones inconsistentes
+ * Servicio de usuarios CORREGIDO con funcionalidad completa de roles y tiers:
+ * - Roles: USER, ADMIN (funcionalidad restaurada)
+ * - Tiers: FREE+INDIVIDUAL, PRO+PRO_SELLER (lógica consistente)
+ * - Combinaciones válidas: cualquier rol puede tener cualquier tier
  */
 @Service
 @RequiredArgsConstructor
@@ -106,13 +107,123 @@ public class UserService implements IUserService {
         return userRepository.findByIsEnabledFalse(pageable);
     }
 
+    // ===== MÉTODOS DE ROLES IMPLEMENTADOS =====
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<User> findUsersByRole(String roleName, Pageable pageable) {
+        log.debug("Finding users by role: {}", roleName);
+        return userRepository.findByRoleName(roleName, pageable);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<User> findAdminUsers(Pageable pageable) {
+        log.debug("Finding admin users with pagination: {}", pageable);
+        return userRepository.findByRoleName("ROLE_ADMIN", pageable);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<User> findRegularUsers(Pageable pageable) {
+        log.debug("Finding regular users with pagination: {}", pageable);
+        return userRepository.findByRoleName("ROLE_USER", pageable);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countUsersByRole(String roleName) {
+        log.debug("Counting users by role: {}", roleName);
+        return userRepository.countByRoleName(roleName);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean userHasRole(Long userId, String roleName) {
+        log.debug("Checking if user {} has role: {}", userId, roleName);
+        User user = getUserById(userId);
+        return user.hasRole(roleName);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<Role> getUserRoles(Long userId) {
+        log.debug("Getting roles for user: {}", userId);
+        User user = getUserById(userId);
+        return Set.copyOf(user.getRoles());
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "users", key = "#userId")
+    public User assignRoleToUser(Long userId, String roleName) {
+        log.info("Assigning role {} to user {}", roleName, userId);
+
+        User user = getUserById(userId);
+        Role role = roleRepository.findByName(roleName)
+                .orElseThrow(() -> new ResourceNotFoundException("Role not found: " + roleName));
+
+        if (!user.hasRole(roleName)) {
+            user.getRoles().add(role);
+            User savedUser = userRepository.save(user);
+            log.info("Role {} assigned to user {} successfully", roleName, userId);
+            return savedUser;
+        } else {
+            log.info("User {} already has role {}", userId, roleName);
+            return user;
+        }
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "users", key = "#userId")
+    public User removeRoleFromUser(Long userId, String roleName) {
+        log.info("Removing role {} from user {}", roleName, userId);
+
+        User user = getUserById(userId);
+
+        // Verificar que no sea el último admin
+        if ("ROLE_ADMIN".equals(roleName) && !canRevokeAdminPrivileges(userId)) {
+            throw new IllegalStateException("Cannot remove admin role: user is the last administrator");
+        }
+
+        user.getRoles().removeIf(role -> role.getName().equals(roleName));
+        User savedUser = userRepository.save(user);
+        log.info("Role {} removed from user {} successfully", roleName, userId);
+        return savedUser;
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "users", key = "#userId")
+    public User updateUserRoles(Long userId, Set<String> roleNames) {
+        log.info("Updating roles for user {} to: {}", userId, roleNames);
+
+        User user = getUserById(userId);
+
+        // Verificar que no se esté removiendo el último admin
+        if (user.hasRole("ROLE_ADMIN") && !roleNames.contains("ROLE_ADMIN") && !canRevokeAdminPrivileges(userId)) {
+            throw new IllegalStateException("Cannot remove admin role: user is the last administrator");
+        }
+
+        // Obtener nuevos roles
+        Set<Role> newRoles = roleNames.stream()
+                .map(roleName -> roleRepository.findByName(roleName)
+                        .orElseThrow(() -> new ResourceNotFoundException("Role not found: " + roleName)))
+                .collect(Collectors.toSet());
+
+        user.setRoles(newRoles);
+        User savedUser = userRepository.save(user);
+        log.info("Roles updated for user {} successfully", userId);
+        return savedUser;
+    }
+
     // ===== MÉTODOS CORREGIDOS PARA SUSCRIPCIONES =====
 
     @Override
     @Transactional(readOnly = true)
     public Page<User> findProUsers(Pageable pageable) {
         log.debug("Finding PRO users (PRO_SELLER) with pagination: {}", pageable);
-        // PRO users son siempre PRO_SELLER según la lógica corregida
         return userRepository.findByUserType(UserType.PRO_SELLER, pageable);
     }
 
@@ -120,7 +231,6 @@ public class UserService implements IUserService {
     @Transactional(readOnly = true)
     public Page<User> findFreeUsers(Pageable pageable) {
         log.debug("Finding FREE users (INDIVIDUAL) with pagination: {}", pageable);
-        // FREE users son siempre INDIVIDUAL según la lógica corregida
         return userRepository.findByUserType(UserType.INDIVIDUAL, pageable);
     }
 
@@ -136,6 +246,29 @@ public class UserService implements IUserService {
     public Page<User> findIndividualUsers(Pageable pageable) {
         log.debug("Finding Individual users with pagination: {}", pageable);
         return userRepository.findByUserType(UserType.INDIVIDUAL, pageable);
+    }
+
+    // ===== MÉTODOS COMBINADOS: ROLES + TIERS =====
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<User> findAdminProSellers(Pageable pageable) {
+        log.debug("Finding admin Pro Sellers with pagination: {}", pageable);
+        return userRepository.findAdminProSellers(pageable);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<User> findRegularProSellers(Pageable pageable) {
+        log.debug("Finding regular Pro Sellers with pagination: {}", pageable);
+        return userRepository.findRegularProSellers(pageable);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<User> findAdminBasicUsers(Pageable pageable) {
+        log.debug("Finding admin basic users with pagination: {}", pageable);
+        return userRepository.findAdminBasicUsers(pageable);
     }
 
     // ===== MÉTODOS DE CONVERSIÓN =====
@@ -182,7 +315,7 @@ public class UserService implements IUserService {
         userDto.setCity(user.getCity());
         userDto.setBirthDate(user.getBirthDate());
 
-        // Mapear roles como lista de strings
+        // CORREGIDO: Mapear roles como lista de strings
         if (user.getRoles() != null && !user.getRoles().isEmpty()) {
             userDto.setRoles(user.getRoles().stream()
                     .map(Role::getName)
@@ -215,28 +348,33 @@ public class UserService implements IUserService {
         return user;
     }
 
-    // ===== MÉTODOS DE CREACIÓN =====
+    // ===== MÉTODOS DE CREACIÓN CORREGIDOS =====
 
     /**
-     * Crea un usuario con rol específico (SIEMPRE FREE + INDIVIDUAL)
+     * Crea un usuario con roles específicos (SIEMPRE FREE + INDIVIDUAL por defecto)
      */
-    private User createUserWithRole(CreateUserRequest request, String roleName) {
-        log.info("Creating user with role {}: {}", roleName, request.getEmail());
+    @Override
+    @Transactional
+    public User createUserWithRoles(CreateUserRequest request, Set<String> roleNames) {
+        log.info("Creating user with roles {}: {}", roleNames, request.getEmail());
 
         if (userRepository.existsByEmail(request.getEmail())) {
             log.warn("Attempt to create user with existing email: {}", request.getEmail());
             throw new AlreadyExistsException("El usuario con email " + request.getEmail() + " ya existe");
         }
 
-        Role userRole = roleRepository.findByName(roleName)
-                .orElseThrow(() -> new ResourceNotFoundException("Rol no encontrado: " + roleName));
+        // Obtener roles válidos
+        Set<Role> roles = roleNames.stream()
+                .map(roleName -> roleRepository.findByName(roleName)
+                        .orElseThrow(() -> new ResourceNotFoundException("Rol no encontrado: " + roleName)))
+                .collect(Collectors.toSet());
 
         User user = User.builder()
                 .firstName(request.getFirstName())
                 .lastName(request.getLastName())
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
-                .roles(Set.of(userRole))
+                .roles(roles)
                 .isEnabled(false) // Usuario deshabilitado hasta verificar email
                 .isAccountNonExpired(true)
                 .isAccountNonLocked(true)
@@ -247,9 +385,14 @@ public class UserService implements IUserService {
                 .build();
 
         User savedUser = userRepository.save(user);
-        log.info("User created successfully with ID: {} (FREE+INDIVIDUAL, email verification required)", savedUser.getId());
+        log.info("User created successfully with ID: {} (roles: {}, tier: FREE+INDIVIDUAL)",
+                savedUser.getId(), roleNames);
 
         return savedUser;
+    }
+
+    private User createUserWithRole(CreateUserRequest request, String roleName) {
+        return createUserWithRoles(request, Set.of(roleName));
     }
 
     @Override
@@ -306,6 +449,11 @@ public class UserService implements IUserService {
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+
+        // Verificar que no sea el último admin
+        if (user.hasRole("ROLE_ADMIN") && !canRevokeAdminPrivileges(userId)) {
+            throw new IllegalStateException("Cannot delete user: is the last administrator");
+        }
 
         userRepository.delete(user);
         log.info("User deleted successfully: {}", userId);
@@ -523,11 +671,11 @@ public class UserService implements IUserService {
                 user.canAccessProFeatures(),
                 user.getUpgradedToProAt(),
                 user.getPaymentMethod(),
-                user.isValidUserConfiguration() // Nuevo campo para validar configuración
+                user.isValidUserConfiguration() // Campo para validar configuración
         );
     }
 
-    // ===== MÉTODOS DE ESTADÍSTICAS =====
+    // ===== MÉTODOS DE ESTADÍSTICAS CORREGIDOS =====
 
     @Override
     @Transactional(readOnly = true)
@@ -542,6 +690,10 @@ public class UserService implements IUserService {
         long individualUsers = freeUsers; // Son lo mismo
         long proSellers = proUsers;       // Son lo mismo
 
+        // NUEVAS ESTADÍSTICAS DE ROLES
+        long adminUsers = userRepository.countByRoleName("ROLE_ADMIN");
+        long regularUsers = userRepository.countByRoleName("ROLE_USER");
+
         return new UserStats(
                 totalUsers,
                 verifiedUsers,
@@ -549,7 +701,47 @@ public class UserService implements IUserService {
                 proUsers,
                 freeUsers,
                 proSellers,
-                individualUsers
+                individualUsers,
+                adminUsers,
+                regularUsers
+        );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public RoleStats getRoleStats() {
+        long totalUsers = userRepository.count();
+        long adminUsers = userRepository.countByRoleName("ROLE_ADMIN");
+        long regularUsers = userRepository.countByRoleName("ROLE_USER");
+
+        // Estadísticas combinadas
+        long adminProSellers = userRepository.countAdminProSellers();
+        long adminBasicUsers = userRepository.countAdminBasicUsers();
+        long regularProSellers = userRepository.countRegularProSellers();
+        long regularBasicUsers = userRepository.countRegularBasicUsers();
+
+        return new RoleStats(
+                totalUsers,
+                adminUsers,
+                regularUsers,
+                adminProSellers,
+                adminBasicUsers,
+                regularProSellers,
+                regularBasicUsers
+        );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CompleteDistribution getCompleteDistribution() {
+        UserStats userStats = getUserStats();
+        RoleStats roleStats = getRoleStats();
+        Map<String, Long> configurationDistribution = getConfigurationDistribution();
+
+        return new CompleteDistribution(
+                userStats,
+                roleStats,
+                configurationDistribution
         );
     }
 
@@ -580,6 +772,70 @@ public class UserService implements IUserService {
     public long countUsersWithInvalidConfigurations() {
         log.debug("Counting users with invalid configurations");
         return userRepository.countUsersWithInvalidConfigurations();
+    }
+
+    // ===== MÉTODOS DE GESTIÓN DE ROLES AVANZADOS =====
+
+    @Override
+    @Transactional
+    @PreAuthorize("hasRole('ADMIN')")
+    @CacheEvict(value = "users", key = "#userId")
+    public User promoteToAdmin(Long userId) {
+        log.info("Promoting user {} to admin", userId);
+
+        if (!canPromoteToAdmin(userId)) {
+            throw new IllegalStateException("User cannot be promoted to admin");
+        }
+
+        return assignRoleToUser(userId, "ROLE_ADMIN");
+    }
+
+    @Override
+    @Transactional
+    @PreAuthorize("hasRole('ADMIN')")
+    @CacheEvict(value = "users", key = "#userId")
+    public User revokeAdminPrivileges(Long userId) {
+        log.info("Revoking admin privileges from user {}", userId);
+
+        if (!canRevokeAdminPrivileges(userId)) {
+            throw new IllegalStateException("Cannot revoke admin privileges: user is the last administrator");
+        }
+
+        return removeRoleFromUser(userId, "ROLE_ADMIN");
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean canPromoteToAdmin(Long userId) {
+        try {
+            User user = getUserById(userId);
+            // Un usuario puede ser promovido a admin si no lo es ya y está verificado
+            return !user.hasRole("ROLE_ADMIN") && user.isEmailVerified();
+        } catch (ResourceNotFoundException e) {
+            return false;
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean canRevokeAdminPrivileges(Long userId) {
+        try {
+            User user = getUserById(userId);
+            if (!user.hasRole("ROLE_ADMIN")) {
+                return false; // No es admin, no se puede revocar
+            }
+
+            long adminCount = getAdminCount();
+            return adminCount > 1; // Solo se puede revocar si hay más de un admin
+        } catch (ResourceNotFoundException e) {
+            return false;
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long getAdminCount() {
+        return userRepository.countByRoleName("ROLE_ADMIN");
     }
 
     // ===== MÉTODOS DE CORRECCIÓN MASIVA =====
@@ -698,10 +954,10 @@ public class UserService implements IUserService {
         user.setUpgradedToProAt(null);
     }
 
-    // ===== RECORDS PARA DATOS ESTRUCTURADOS =====
+    // ===== RECORDS PARA DATOS ESTRUCTURADOS ACTUALIZADOS =====
 
     /**
-     * Record para estadísticas de usuarios CORREGIDO
+     * Record para estadísticas de usuarios CORREGIDO con roles
      */
     public record UserStats(
             long totalUsers,
@@ -710,7 +966,31 @@ public class UserService implements IUserService {
             long proUsers,        // = proSellers
             long freeUsers,       // = individualUsers
             long proSellers,      // = proUsers
-            long individualUsers  // = freeUsers
+            long individualUsers, // = freeUsers
+            long adminUsers,      // NUEVO: usuarios con rol ADMIN
+            long regularUsers     // NUEVO: usuarios con rol USER
+    ) {}
+
+    /**
+     * Record para estadísticas de roles NUEVO
+     */
+    public record RoleStats(
+            long totalUsers,
+            long adminUsers,
+            long regularUsers,
+            long adminProSellers,     // Admins que son PRO_SELLER
+            long adminBasicUsers,     // Admins que son INDIVIDUAL
+            long regularProSellers,   // Users que son PRO_SELLER
+            long regularBasicUsers    // Users que son INDIVIDUAL
+    ) {}
+
+    /**
+     * Record para distribución completa NUEVO
+     */
+    public record CompleteDistribution(
+            UserStats userStats,
+            RoleStats roleStats,
+            Map<String, Long> configurationDistribution
     ) {}
 
     /**
@@ -738,6 +1018,4 @@ public class UserService implements IUserService {
             double healthPercentage,
             Map<String, Long> configurationDistribution
     ) {}
-
-
 }

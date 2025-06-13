@@ -5,6 +5,7 @@ import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskDecorator;
 import org.springframework.scheduling.annotation.AsyncConfigurer;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -13,8 +14,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
 
 /**
- * Configuración para procesamiento asíncrono
- * Especialmente importante para el envío de emails
+ * Configuración mejorada para procesamiento asíncrono
+ * Especialmente optimizada para el envío de emails secuencial
  */
 @Configuration
 @EnableAsync
@@ -35,7 +36,7 @@ public class AsyncConfig implements AsyncConfigurer {
     private String threadNamePrefix;
 
     /**
-     * Configuración del executor para tareas asíncronas
+     * Configuración del executor para tareas asíncronas generales
      */
     @Override
     @Bean(name = "taskExecutor")
@@ -69,28 +70,63 @@ public class AsyncConfig implements AsyncConfigurer {
 
     /**
      * Configuración específica para envío de emails
+     * CRÍTICO: Se configura con un solo hilo para envío secuencial
      */
     @Bean(name = "emailTaskExecutor")
     public Executor emailTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
 
+        // CONFIGURACIÓN CRÍTICA: Un solo hilo para envíos secuenciales
+        // Esto evita problemas de conexiones concurrentes al servidor SMTP
         executor.setCorePoolSize(1);
-        executor.setMaxPoolSize(3);
-        executor.setQueueCapacity(50);
+        executor.setMaxPoolSize(1); // SOLO UN HILO - CRÍTICO
+        executor.setQueueCapacity(100); // Cola grande para manejar múltiples emails
         executor.setThreadNamePrefix("email-sender-");
 
-        // Para emails, queremos asegurar que se procesen
+        // Para emails, queremos asegurar que se procesen siempre
         executor.setRejectedExecutionHandler((runnable, threadPoolExecutor) -> {
-            log.error("Email task rejected! This should not happen. Trying to run in current thread.");
+            log.error("Email task rejected! Queue full. Trying to run in current thread.");
+            log.warn("Email queue status - Pool size: {}, Active: {}, Queue size: {}",
+                    threadPoolExecutor.getPoolSize(),
+                    threadPoolExecutor.getActiveCount(),
+                    threadPoolExecutor.getQueue().size());
+
+            // Como último recurso, ejecutar en el hilo actual
             runnable.run();
         });
+
+        // Configuración de cierre elegante
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(120); // Más tiempo para emails
+
+        // Decorador de tareas para logging mejorado
+        executor.setTaskDecorator(new EmailTaskDecorator());
+
+        executor.initialize();
+
+        log.info("Email task executor configured with SINGLE THREAD to prevent SMTP connection issues");
+
+        return executor;
+    }
+
+    /**
+     * Configuración adicional para tareas de limpieza y mantenimiento
+     */
+    @Bean(name = "maintenanceTaskExecutor")
+    public Executor maintenanceTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(10);
+        executor.setThreadNamePrefix("maintenance-");
 
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
 
         executor.initialize();
 
-        log.info("Email task executor configured");
+        log.info("Maintenance task executor configured");
 
         return executor;
     }
@@ -104,10 +140,54 @@ public class AsyncConfig implements AsyncConfigurer {
             log.error("Uncaught async exception in method '{}' with params {}: {}",
                     method.getName(), params, ex.getMessage(), ex);
 
-            // Aquí podrías agregar lógica adicional como:
-            // - Enviar notificación a administradores
-            // - Guardar en base de datos para debugging
-            // - Métricas de errores
+            // Log adicional para métodos de email
+            if (method.getName().contains("Email") || method.getName().contains("email")) {
+                log.error("EMAIL ASYNC ERROR - Method: {}, Exception: {}",
+                        method.getName(), ex.getClass().getSimpleName());
+
+                // Aquí podrías agregar lógica adicional como:
+                // - Enviar notificación a administradores
+                // - Guardar en base de datos para debugging
+                // - Métricas de errores de email
+
+                if (params.length > 0 && params[0] instanceof String) {
+                    log.error("Failed email recipient: {}", params[0]);
+                }
+            }
         };
+    }
+
+    /**
+     * Decorador personalizado para tareas de email
+     * Proporciona contexto adicional y manejo de errores
+     */
+    private static class EmailTaskDecorator implements TaskDecorator {
+        @Override
+        public Runnable decorate(Runnable runnable) {
+            return () -> {
+                String threadName = Thread.currentThread().getName();
+                long startTime = System.currentTimeMillis();
+
+                try {
+                    log.debug("Starting email task in thread: {}", threadName);
+                    runnable.run();
+
+                } catch (Exception e) {
+                    log.error("Error in email task thread {}: {}", threadName, e.getMessage(), e);
+                    throw e;
+
+                } finally {
+                    long duration = System.currentTimeMillis() - startTime;
+                    log.debug("Email task completed in thread: {} ({}ms)", threadName, duration);
+
+                    // Pequeña pausa para dar tiempo entre tareas de email
+                    try {
+                        Thread.sleep(500);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            };
+        }
     }
 }

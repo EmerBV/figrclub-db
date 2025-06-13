@@ -9,10 +9,8 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.thymeleaf.TemplateEngine;
-import org.thymeleaf.context.Context;
 
 import jakarta.mail.MessagingException;
-import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import java.io.UnsupportedEncodingException;
 import java.util.concurrent.CompletableFuture;
@@ -25,7 +23,6 @@ import java.util.concurrent.CompletableFuture;
 @RequiredArgsConstructor
 @Slf4j
 public class EmailService {
-
     private final JavaMailSender mailSender;
     private final TemplateEngine templateEngine;
 
@@ -60,7 +57,7 @@ public class EmailService {
             String subject = "Verifica tu cuenta - FigrClub";
             String htmlContent = buildVerificationEmailContent(userName, token);
 
-            boolean sent = sendEmail(toEmail, subject, htmlContent);
+            boolean sent = sendEmailWithRetry(toEmail, subject, htmlContent, 3);
 
             if (sent) {
                 log.info("Verification email sent successfully to: {}", toEmail);
@@ -89,10 +86,13 @@ public class EmailService {
                 return CompletableFuture.completedFuture(true);
             }
 
+            // Agregar un pequeño delay para evitar problemas de conexión concurrente
+            Thread.sleep(2000);
+
             String subject = "¡Bienvenido a FigrClub!";
             String htmlContent = buildWelcomeEmailContent(userName);
 
-            boolean sent = sendEmail(toEmail, subject, htmlContent);
+            boolean sent = sendEmailWithRetry(toEmail, subject, htmlContent, 3);
 
             if (sent) {
                 log.info("Welcome email sent successfully to: {}", toEmail);
@@ -109,59 +109,208 @@ public class EmailService {
     }
 
     /**
-     * Método privado mejorado para enviar emails con mejor manejo de errores
+     * Método mejorado para enviar emails con reintentos más conservadores
      */
-    private boolean sendEmail(String to, String subject, String htmlContent) {
-        try {
-            MimeMessage mimeMessage = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
+    private boolean sendEmailWithRetry(String to, String subject, String htmlContent, int maxRetries) {
+        int attempts = 0;
 
-            // CORRECCIÓN: Usar InternetAddress para manejar el nombre del remitente
+        while (attempts < maxRetries) {
             try {
-                InternetAddress fromAddress = new InternetAddress(fromEmail, fromName, "UTF-8");
-                helper.setFrom(fromAddress);
-            } catch (UnsupportedEncodingException e) {
-                log.warn("Error setting sender name, using email only: {}", e.getMessage());
-                helper.setFrom(fromEmail); // Fallback a solo email
+                attempts++;
+                log.debug("Attempting to send email to {} (attempt {}/{})", to, attempts, maxRetries);
+
+                // Crear una nueva instancia de MimeMessage para cada intento
+                MimeMessage mimeMessage = mailSender.createMimeMessage();
+                MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
+
+                // Configurar el mensaje de forma simple
+                helper.setFrom(fromEmail, fromName);
+                helper.setTo(to);
+                helper.setSubject(subject);
+                helper.setText(htmlContent, true);
+
+                // Headers básicos solamente
+                mimeMessage.setHeader("Message-ID", generateMessageId());
+                mimeMessage.setHeader("X-Mailer", "FigrClub-Application");
+
+                // Enviar el mensaje
+                mailSender.send(mimeMessage);
+
+                log.debug("Email sent successfully to {} on attempt {}", to, attempts);
+                return true;
+
+            } catch (MessagingException | UnsupportedEncodingException e) {
+                log.warn("Error sending email to {} (attempt {}): {}", to, attempts, e.getMessage());
+                if (attempts >= maxRetries) {
+                    log.error("Failed to send email to {} after {} attempts: {}", to, maxRetries, e.getMessage(), e);
+                    return false;
+                }
+                waitBetweenRetries(attempts);
+
+            } catch (MailException e) {
+                log.warn("MailException sending email to {} (attempt {}): {}", to, attempts, e.getMessage());
+                if (attempts >= maxRetries) {
+                    log.error("Failed to send email to {} after {} attempts: {}", to, maxRetries, e.getMessage(), e);
+                    return false;
+                }
+                waitBetweenRetries(attempts);
+
+            } catch (Exception e) {
+                log.error("Unexpected error sending email to {} (attempt {}): {}", to, attempts, e.getMessage(), e);
+                if (attempts >= maxRetries) {
+                    return false;
+                }
+                waitBetweenRetries(attempts);
             }
+        }
 
-            helper.setTo(to);
-            helper.setSubject(subject);
-            helper.setText(htmlContent, true);
+        return false;
+    }
 
-            // Agregar headers adicionales para mejorar la entrega
-            mimeMessage.setHeader("Message-ID", generateMessageId());
-            mimeMessage.setHeader("X-Mailer", "FigrClub-Application");
-
-            mailSender.send(mimeMessage);
-            return true;
-
-        } catch (MessagingException e) {
-            log.error("MessagingException sending email to {}: {}", to, e.getMessage(), e);
-            return false;
-        } catch (MailException e) {
-            log.error("MailException sending email to {}: {}", to, e.getMessage(), e);
-            return false;
-        } catch (Exception e) {
-            log.error("Unexpected error sending email to {}: {}", to, e.getMessage(), e);
-            return false;
+    /**
+     * Espera entre reintentos con backoff más conservador
+     */
+    private void waitBetweenRetries(int attempt) {
+        try {
+            // Backoff más conservador: 2s, 3s, 5s...
+            long waitTime = 2000L + (attempt * 1000L);
+            log.debug("Waiting {}ms before retry...", waitTime);
+            Thread.sleep(waitTime);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Sleep interrupted during email retry wait");
         }
     }
 
     /**
-     * Construye el contenido del email de verificación
+     * Método privado legacy mantenido para compatibilidad (DEPRECATED)
+     * @deprecated Use sendEmailWithRetry instead
+     */
+    @Deprecated
+    private boolean sendEmail(String to, String subject, String htmlContent) {
+        return sendEmailWithRetry(to, subject, htmlContent, 1);
+    }
+
+    /**
+     * Construye el contenido del email de verificación - ESTILO ORIGINAL SIMPLE
      */
     private String buildVerificationEmailContent(String userName, String token) {
         String verificationUrl = backendUrl + apiPrefix + "/email/verify?token=" + token;
 
-        return buildSimpleEmailTemplate(
-                "Verifica tu cuenta en FigrClub",
-                "¡Hola " + userName + "!",
-                "Para completar tu registro, por favor verifica tu email haciendo clic en el botón:",
-                "Verificar Email",
-                verificationUrl,
-                "Si no creaste esta cuenta, puedes ignorar este email."
-        );
+        return """
+                <!DOCTYPE html>
+                <html lang="es">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Verifica tu cuenta en FigrClub</title>
+                    <style>
+                        body {
+                            font-family: Arial, sans-serif;
+                            margin: 0;
+                            padding: 40px;
+                            background-color: #f4f4f4;
+                        }
+                        .email-container {
+                            max-width: 600px;
+                            margin: 0 auto;
+                            background-color: white;
+                            padding: 40px;
+                            border-radius: 8px;
+                            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                        }
+                        .header {
+                            text-align: center;
+                            margin-bottom: 30px;
+                        }
+                        .header h1 {
+                            color: #3498db;
+                            font-size: 32px;
+                            margin: 0;
+                            font-weight: normal;
+                        }
+                        .content {
+                            text-align: center;
+                            margin-bottom: 30px;
+                        }
+                        .content h2 {
+                            color: #333;
+                            font-size: 24px;
+                            margin-bottom: 20px;
+                            font-weight: normal;
+                        }
+                        .content p {
+                            color: #666;
+                            font-size: 16px;
+                            line-height: 1.5;
+                            margin-bottom: 30px;
+                        }
+                        .button-container {
+                            text-align: center;
+                            margin: 30px 0;
+                        }
+                        .verify-button {
+                            display: inline-block;
+                            background-color: #3498db;
+                            color: white;
+                            padding: 15px 30px;
+                            text-decoration: none;
+                            border-radius: 5px;
+                            font-size: 16px;
+                            font-weight: bold;
+                        }
+                        .footer {
+                            margin-top: 40px;
+                            padding-top: 20px;
+                            border-top: 1px solid #eee;
+                            font-size: 14px;
+                            color: #999;
+                            text-align: center;
+                        }
+                        .url-fallback {
+                            margin-top: 20px;
+                            padding: 15px;
+                            background-color: #f8f9fa;
+                            border-radius: 5px;
+                            font-size: 12px;
+                            color: #666;
+                            word-break: break-all;
+                        }
+                        .url-fallback a {
+                            color: #3498db;
+                            text-decoration: none;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="email-container">
+                        <div class="header">
+                            <h1>Verifica tu cuenta en FigrClub</h1>
+                        </div>
+                        
+                        <div class="content">
+                            <h2>¡Hola %s!</h2>
+                            <p>Para completar tu registro, por favor verifica tu email haciendo clic en el botón:</p>
+                        </div>
+                        
+                        <div class="button-container">
+                            <a href="%s" class="verify-button">Verificar Email</a>
+                        </div>
+                        
+                        <div class="footer">
+                            <p>Si no creaste esta cuenta, puedes ignorar este email.</p>
+                            
+                            <div class="url-fallback">
+                                <p>Si tienes problemas con el botón, copia y pega esta URL en tu navegador:</p>
+                                <a href="%s">%s</a>
+                            </div>
+                            
+                            <p style="margin-top: 20px;">Este email fue enviado por <strong>FigrClub</strong></p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """.formatted(userName, verificationUrl, verificationUrl, verificationUrl);
     }
 
     /**
@@ -172,126 +321,7 @@ public class EmailService {
     }
 
     /**
-     * Construye un template simple de email
-     */
-    private String buildSimpleEmailTemplate(String title, String greeting, String message,
-                                            String buttonText, String buttonUrl, String footer) {
-        return """
-                <!DOCTYPE html>
-                <html lang="es">
-                <head>
-                    <meta charset="UTF-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>%s</title>
-                    <style>
-                        * {
-                            margin: 0;
-                            padding: 0;
-                            box-sizing: border-box;
-                        }
-                        body { 
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-                            line-height: 1.6; 
-                            color: #333; 
-                            background-color: #f5f5f5;
-                            padding: 20px;
-                        }
-                        .email-container {
-                            max-width: 600px;
-                            margin: 0 auto;
-                            background-color: white;
-                            padding: 40px;
-                            border-radius: 12px;
-                            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-                        }
-                        .header { 
-                            text-align: center; 
-                            margin-bottom: 40px; 
-                            color: #2c3e50;
-                        }
-                        .header h1 {
-                            margin: 0;
-                            font-size: 28px;
-                            font-weight: 600;
-                            color: #3498db;
-                        }
-                        .content { 
-                            margin-bottom: 40px; 
-                            text-align: center;
-                        }
-                        .content p {
-                            margin-bottom: 20px;
-                            font-size: 16px;
-                            line-height: 1.6;
-                        }
-                        .button {
-                            display: inline-block;
-                            padding: 16px 32px;
-                            background: linear-gradient(135deg, #3498db, #2980b9);
-                            color: white;
-                            text-decoration: none;
-                            border-radius: 8px;
-                            font-weight: 600;
-                            font-size: 16px;
-                            margin: 30px 0;
-                            transition: all 0.3s ease;
-                            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
-                        }
-                        .button:hover {
-                            background: linear-gradient(135deg, #2980b9, #2471a3);
-                            box-shadow: 0 6px 20px rgba(52, 152, 219, 0.4);
-                        }
-                        .footer {
-                            margin-top: 40px;
-                            padding-top: 30px;
-                            border-top: 1px solid #eee;
-                            font-size: 14px;
-                            color: #666;
-                            text-align: center;
-                            line-height: 1.5;
-                        }
-                        .footer p {
-                            margin-bottom: 10px;
-                        }
-                        .footer .url {
-                            word-break: break-all;
-                            color: #3498db;
-                            font-size: 12px;
-                        }
-                        .brand {
-                            color: #3498db;
-                            font-weight: 600;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="email-container">
-                        <div class="header">
-                            <h1>%s</h1>
-                        </div>
-                        
-                        <div class="content">
-                            <p><strong>%s</strong></p>
-                            <p>%s</p>
-                            
-                            <a href="%s" class="button">%s</a>
-                        </div>
-                        
-                        <div class="footer">
-                            <p>%s</p>
-                            <p>Si tienes problemas con el botón, copia y pega esta URL en tu navegador:</p>
-                            <p class="url">%s</p>
-                            <br>
-                            <p><small>Este email fue enviado por <span class="brand">FigrClub</span></small></p>
-                        </div>
-                    </div>
-                </body>
-                </html>
-                """.formatted(title, title, greeting, message, buttonUrl, buttonText, footer, buttonUrl);
-    }
-
-    /**
-     * Construye el contenido del email de bienvenida (SIN botón de login)
+     * Template específico para email de bienvenida
      */
     private String buildWelcomeEmailTemplate(String userName) {
         return """
@@ -331,69 +361,61 @@ public class EmailService {
                         margin: 0;
                         font-size: 28px;
                         font-weight: 600;
-                        color: #3498db;
                     }
-                    .success-icon {
-                        width: 80px;
-                        height: 80px;
-                        background: #4CAF50;
-                        border-radius: 50%%;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        margin: 0 auto 30px;
-                        font-size: 40px;
-                        color: white;
-                    }
-                    .content { 
-                        margin-bottom: 40px; 
+                    .welcome-message {
                         text-align: center;
+                        margin-bottom: 30px;
+                        padding: 20px;
+                        background-color: #e8f5e8;
+                        border-radius: 8px;
+                        border-left: 4px solid #27ae60;
+                    }
+                    .welcome-message h2 {
+                        color: #27ae60;
+                        margin-bottom: 10px;
+                    }
+                    .content {
+                        margin-bottom: 30px;
                     }
                     .content p {
-                        margin-bottom: 20px;
+                        margin-bottom: 15px;
                         font-size: 16px;
                         line-height: 1.6;
                     }
-                    .welcome-message {
-                        background: linear-gradient(135deg, #3498db, #2980b9);
-                        color: white;
-                        padding: 30px;
-                        border-radius: 12px;
-                        margin: 30px 0;
-                    }
-                    .welcome-message h2 {
-                        margin-bottom: 15px;
-                        font-size: 24px;
-                    }
                     .features {
-                        text-align: left;
-                        margin: 30px 0;
+                        background-color: #f8f9fa;
+                        padding: 20px;
+                        border-radius: 8px;
+                        margin: 20px 0;
+                    }
+                    .features h3 {
+                        color: #2c3e50;
+                        margin-bottom: 15px;
                     }
                     .features ul {
                         list-style: none;
                         padding: 0;
                     }
                     .features li {
-                        padding: 10px 0;
-                        padding-left: 30px;
-                        position: relative;
+                        padding: 8px 0;
+                        border-bottom: 1px solid #dee2e6;
+                    }
+                    .features li:last-child {
+                        border-bottom: none;
                     }
                     .features li:before {
-                        content: "✓";
-                        position: absolute;
-                        left: 0;
-                        color: #4CAF50;
+                        content: "✓ ";
+                        color: #27ae60;
                         font-weight: bold;
-                        font-size: 18px;
+                        margin-right: 8px;
                     }
                     .footer {
-                        margin-top: 40px;
-                        padding-top: 30px;
-                        border-top: 1px solid #eee;
-                        font-size: 14px;
-                        color: #666;
                         text-align: center;
-                        line-height: 1.5;
+                        margin-top: 40px;
+                        padding-top: 20px;
+                        border-top: 1px solid #eee;
+                        color: #666;
+                        font-size: 14px;
                     }
                     .brand {
                         color: #3498db;
@@ -404,17 +426,17 @@ public class EmailService {
             <body>
                 <div class="email-container">
                     <div class="header">
-                        <div class="success-icon">✓</div>
-                        <h1>¡Bienvenido a FigrClub!</h1>
+                        <h1><span class="brand">FigrClub</span></h1>
+                    </div>
+                    
+                    <div class="welcome-message">
+                        <h2>🎉 ¡Tu cuenta ha sido verificada!</h2>
+                        <p>¡Hola %s! Ya puedes utilizar todos nuestros servicios.</p>
                     </div>
                     
                     <div class="content">
-                        <div class="welcome-message">
-                            <h2>¡Hola %s!</h2>
-                            <p>Tu cuenta ha sido verificada exitosamente y ya forma parte de la comunidad FigrClub.</p>
-                        </div>
-                        
-                        <p>Tu registro se ha completado y tu email está verificado. Ya puedes utilizar todos nuestros servicios.</p>
+                        <p>Tu verificación de email se ha completado exitosamente. 
+                        Ya puedes utilizar todos nuestros servicios.</p>
                         
                         <div class="features">
                             <h3>¿Qué puedes hacer ahora?</h3>
@@ -468,6 +490,6 @@ public class EmailService {
      * Método para envío síncrono (para casos especiales)
      */
     public boolean sendEmailSync(String to, String subject, String htmlContent) {
-        return sendEmail(to, subject, htmlContent);
+        return sendEmailWithRetry(to, subject, htmlContent, 3);
     }
 }

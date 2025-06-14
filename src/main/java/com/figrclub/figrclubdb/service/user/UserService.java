@@ -321,7 +321,91 @@ public class UserService implements IUserService {
             userDto.setRoleDescription(user.getRole().getDescription());
         }
 
+        // ===== NUEVA FUNCIONALIDAD: INFORMACIÓN DE IMÁGENES =====
+
+        // URLs de imágenes
+        userDto.setProfileImageUrl(user.getProfileImageUrl());
+        userDto.setCoverImageUrl(user.getCoverImageUrl());
+
+        // Indicadores de presencia de imágenes
+        userDto.setHasProfileImage(user.hasProfileImage());
+        userDto.setHasCoverImage(user.hasCoverImage());
+
+        // Contador de imágenes activas
+        userDto.setActiveImageCount(user.getActiveImageCount());
+
+        // Capacidades de imágenes del usuario
+        UserDto.ImageCapabilitiesDto imageCapabilities = UserDto.ImageCapabilitiesDto.builder()
+                .canUploadProfileImage(true) // Todos los usuarios pueden subir imagen de perfil
+                .canUploadCoverImage(user.canHaveCoverImage()) // Solo usuarios PRO
+                .maxProfileImageSize(2097152L) // 2MB - podría venir de @Value en el futuro
+                .maxCoverImageSize(5242880L)  // 5MB - podría venir de @Value en el futuro
+                .build();
+
+        // Calcular tamaños en MB para mostrar al usuario
+        imageCapabilities.setMaxProfileImageSizeMB(
+                String.format("%.1f MB", imageCapabilities.getMaxProfileImageSize() / (1024.0 * 1024.0))
+        );
+        imageCapabilities.setMaxCoverImageSizeMB(
+                String.format("%.1f MB", imageCapabilities.getMaxCoverImageSize() / (1024.0 * 1024.0))
+        );
+
+        userDto.setImageCapabilities(imageCapabilities);
+
         return userDto;
+    }
+
+    // ===== MÉTODOS AUXILIARES PARA IMÁGENES =====
+
+    /**
+     * Obtiene las capacidades de imágenes para un usuario específico
+     * Método público que puede ser usado por otros servicios
+     */
+    public UserDto.ImageCapabilitiesDto getUserImageCapabilities(Long userId) {
+        User user = getUserById(userId);
+
+        return UserDto.ImageCapabilitiesDto.builder()
+                .canUploadProfileImage(true)
+                .canUploadCoverImage(user.canHaveCoverImage())
+                .maxProfileImageSize(2097152L) // 2MB
+                .maxCoverImageSize(5242880L)  // 5MB
+                .maxProfileImageSizeMB("2.0 MB")
+                .maxCoverImageSizeMB("5.0 MB")
+                .build();
+    }
+
+    /**
+     * Obtiene información resumida de imágenes de un usuario
+     */
+    public Map<String, Object> getUserImageSummary(Long userId) {
+        User user = getUserById(userId);
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("hasProfileImage", user.hasProfileImage());
+        summary.put("hasCoverImage", user.hasCoverImage());
+        summary.put("profileImageUrl", user.getProfileImageUrl());
+        summary.put("coverImageUrl", user.getCoverImageUrl());
+        summary.put("totalActiveImages", user.getActiveImageCount());
+        summary.put("canUploadCoverImage", user.canHaveCoverImage());
+
+        return summary;
+    }
+
+    /**
+     * Verifica si un usuario puede subir un tipo específico de imagen
+     */
+    public boolean userCanUploadImageType(Long userId, String imageType) {
+        User user = getUserById(userId);
+
+        if ("PROFILE".equalsIgnoreCase(imageType)) {
+            return true; // Todos pueden subir imagen de perfil
+        }
+
+        if ("COVER".equalsIgnoreCase(imageType)) {
+            return user.canHaveCoverImage(); // Solo usuarios PRO
+        }
+
+        return false;
     }
 
     @Override

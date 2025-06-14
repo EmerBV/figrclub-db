@@ -1,6 +1,7 @@
 package com.figrclub.figrclubdb.domain.model;
 
 import com.figrclub.figrclubdb.domain.base.Auditable;
+import com.figrclub.figrclubdb.enums.ImageType;
 import com.figrclub.figrclubdb.enums.SubscriptionType;
 import com.figrclub.figrclubdb.enums.UserType;
 import jakarta.persistence.*;
@@ -12,6 +13,9 @@ import org.hibernate.annotations.NaturalId;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * Entidad User MODIFICADA para tener un solo rol inmutable:
@@ -60,6 +64,85 @@ public class User extends Auditable {
     @NotBlank(message = "Password is required")
     @Column(nullable = false)
     private String password;
+
+    // ===== RELACIÓN CON IMÁGENES =====
+
+    /**
+     * Imágenes del usuario (perfil y portada)
+     */
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<UserImage> images = new ArrayList<>();
+
+// ===== MÉTODOS DE CONVENIENCIA PARA IMÁGENES =====
+
+    /**
+     * Obtiene la imagen de perfil activa
+     */
+    public Optional<UserImage> getActiveProfileImage() {
+        return images.stream()
+                .filter(img -> img.getImageType() == ImageType.PROFILE && img.getIsActive())
+                .findFirst();
+    }
+
+    /**
+     * Obtiene la imagen de portada activa (solo para usuarios PRO)
+     */
+    public Optional<UserImage> getActiveCoverImage() {
+        return images.stream()
+                .filter(img -> img.getImageType() == ImageType.COVER && img.getIsActive())
+                .findFirst();
+    }
+
+    /**
+     * Obtiene la URL de la imagen de perfil activa
+     */
+    public String getProfileImageUrl() {
+        return getActiveProfileImage()
+                .map(UserImage::getPublicUrl)
+                .orElse(null);
+    }
+
+    /**
+     * Obtiene la URL de la imagen de portada activa
+     */
+    public String getCoverImageUrl() {
+        if (!isProSeller()) {
+            return null; // Solo usuarios PRO pueden tener imagen de portada
+        }
+        return getActiveCoverImage()
+                .map(UserImage::getPublicUrl)
+                .orElse(null);
+    }
+
+    /**
+     * Verifica si el usuario tiene imagen de perfil
+     */
+    public boolean hasProfileImage() {
+        return getActiveProfileImage().isPresent();
+    }
+
+    /**
+     * Verifica si el usuario tiene imagen de portada
+     */
+    public boolean hasCoverImage() {
+        return getActiveCoverImage().isPresent();
+    }
+
+    /**
+     * Obtiene el número total de imágenes activas
+     */
+    public long getActiveImageCount() {
+        return images.stream()
+                .filter(UserImage::getIsActive)
+                .count();
+    }
+
+    /**
+     * Verifica si el usuario puede tener imagen de portada
+     */
+    public boolean canHaveCoverImage() {
+        return getSubscriptionType() == SubscriptionType.PRO;
+    }
 
     // ===== CAMPOS DE CONTACTO ADICIONALES =====
     @Column(name = "phone", length = 20)

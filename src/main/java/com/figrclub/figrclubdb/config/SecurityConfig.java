@@ -50,6 +50,7 @@ public class SecurityConfig {
             "/figrclub/api/v1/password/validate-token",
             "/figrclub/api/v1/rate-limit/status", // AÑADIDO
             "/figrclub/api/v1/email/verify",
+            "/figrclub/api/v1/images/",
             "/actuator/health",
             "/api-docs/**", // Actualizado según tu configuración
             "/swagger-ui/**",

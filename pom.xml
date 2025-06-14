@@ -133,6 +133,37 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- Para procesamiento de imágenes (redimensionamiento, compresión) -->
+		<!-- Ya incluido en Java, pero buena práctica explicitarlo -->
+
+		<!-- Apache Commons FileUpload (opcional, para funcionalidades avanzadas) -->
+		<dependency>
+			<groupId>commons-fileupload</groupId>
+			<artifactId>commons-fileupload</artifactId>
+			<version>1.5</version>
+		</dependency>
+
+		<!-- Apache Commons IO (para operaciones de archivos) -->
+		<dependency>
+			<groupId>commons-io</groupId>
+			<artifactId>commons-io</artifactId>
+			<version>2.11.0</version>
+		</dependency>
+
+		<!-- Para manipulación avanzada de imágenes (opcional) -->
+		<dependency>
+			<groupId>org.imgscalr</groupId>
+			<artifactId>imgscalr-lib</artifactId>
+			<version>4.2</version>
+		</dependency>
+
+		<!-- Para validación avanzada de tipos MIME -->
+		<dependency>
+			<groupId>org.apache.tika</groupId>
+			<artifactId>tika-core</artifactId>
+			<version>2.9.1</version>
+		</dependency>
+
 		<!-- Payment Services -->
 		<dependency>
 			<groupId>com.stripe</groupId>

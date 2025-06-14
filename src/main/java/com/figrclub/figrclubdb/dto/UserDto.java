@@ -5,7 +5,10 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.figrclub.figrclubdb.enums.SubscriptionType;
 import com.figrclub.figrclubdb.enums.UserType;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -189,5 +192,83 @@ public class UserDto {
         private final String description;
         private final boolean modifiable;
         private final boolean isAdmin;
+    }
+
+    // ===== CAMPOS DE IMÁGENES =====
+
+    /**
+     * URL de la imagen de perfil activa
+     */
+    private String profileImageUrl;
+
+    /**
+     * URL de la imagen de portada activa (solo para usuarios PRO)
+     */
+    private String coverImageUrl;
+
+    /**
+     * Indica si el usuario tiene imagen de perfil
+     */
+    private Boolean hasProfileImage;
+
+    /**
+     * Indica si el usuario tiene imagen de portada
+     */
+    private Boolean hasCoverImage;
+
+    /**
+     * Número total de imágenes activas del usuario
+     */
+    private Long activeImageCount;
+
+    /**
+     * Información sobre capacidades de imágenes del usuario
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private ImageCapabilitiesDto imageCapabilities;
+
+// ===== CLASE INTERNA PARA CAPACIDADES DE IMÁGENES =====
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class ImageCapabilitiesDto {
+        private Boolean canUploadProfileImage;
+        private Boolean canUploadCoverImage;
+        private Long maxProfileImageSize;
+        private Long maxCoverImageSize;
+        private String maxProfileImageSizeMB;
+        private String maxCoverImageSizeMB;
+    }
+
+// ===== MÉTODOS DE CONVENIENCIA =====
+
+    /**
+     * Obtiene el tamaño máximo de imagen de perfil en MB
+     */
+    public String getMaxProfileImageSizeMB() {
+        if (imageCapabilities != null && imageCapabilities.getMaxProfileImageSize() != null) {
+            return String.format("%.1f MB", imageCapabilities.getMaxProfileImageSize() / (1024.0 * 1024.0));
+        }
+        return "2.0 MB"; // Valor por defecto
+    }
+
+    /**
+     * Obtiene el tamaño máximo de imagen de portada en MB
+     */
+    public String getMaxCoverImageSizeMB() {
+        if (imageCapabilities != null && imageCapabilities.getMaxCoverImageSize() != null) {
+            return String.format("%.1f MB", imageCapabilities.getMaxCoverImageSize() / (1024.0 * 1024.0));
+        }
+        return "5.0 MB"; // Valor por defecto
+    }
+
+    /**
+     * Verifica si el usuario puede tener imagen de portada
+     */
+    public boolean canHaveCoverImage() {
+        return subscriptionType == SubscriptionType.PRO;
     }
 }

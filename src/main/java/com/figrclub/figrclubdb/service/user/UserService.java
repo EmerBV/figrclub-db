@@ -96,6 +96,52 @@ public class UserService implements IUserService {
         return userRepository.findAll(pageable);
     }
 
+    /**
+     * Implementación optimizada que usa query directa
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public Page<User> findVerifiedRegularUsers(Pageable pageable) {
+        log.info("Finding verified regular users with pagination: {}", pageable);
+
+        try {
+            return userRepository.findVerifiedRegularUsers(pageable);
+        } catch (Exception e) {
+            log.error("Error finding verified regular users", e);
+            throw new RuntimeException("Error retrieving verified regular users", e);
+        }
+    }
+
+    /**
+     * Implementación para obtener usuarios públicos con filtros
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public Page<User> findPublicUsers(Pageable pageable, UserType userType, SubscriptionType subscriptionType) {
+        log.info("Finding public users with filters - userType: {}, subscriptionType: {}", userType, subscriptionType);
+
+        try {
+            return userRepository.findPublicUsers(userType, subscriptionType, pageable);
+        } catch (Exception e) {
+            log.error("Error finding public users with filters", e);
+            throw new RuntimeException("Error retrieving filtered public users", e);
+        }
+    }
+
+    /**
+     * Contador de usuarios públicos
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public long countPublicUsers() {
+        try {
+            return userRepository.countPublicUsers();
+        } catch (Exception e) {
+            log.error("Error counting public users", e);
+            return 0L;
+        }
+    }
+
     @Override
     @Transactional(readOnly = true)
     public Page<User> findActiveUsers(Pageable pageable) {

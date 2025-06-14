@@ -3,6 +3,8 @@ package com.figrclub.figrclubdb.service.user;
 import com.figrclub.figrclubdb.domain.model.Role;
 import com.figrclub.figrclubdb.domain.model.User;
 import com.figrclub.figrclubdb.dto.UserDto;
+import com.figrclub.figrclubdb.enums.SubscriptionType;
+import com.figrclub.figrclubdb.enums.UserType;
 import com.figrclub.figrclubdb.request.CreateUserRequest;
 import com.figrclub.figrclubdb.request.UpdateContactInfoRequest;
 import com.figrclub.figrclubdb.request.UpdateBusinessInfoRequest;
@@ -59,6 +61,21 @@ public interface IUserService {
      * @return Página de todos los usuarios
      */
     Page<User> findAllUsers(Pageable pageable);
+
+    /**
+     * Encuentra usuarios regulares verificados y activos
+     */
+    Page<User> findVerifiedRegularUsers(Pageable pageable);
+
+    /**
+     * Encuentra usuarios públicos (verificados, activos, no-admins)
+     */
+    Page<User> findPublicUsers(Pageable pageable, UserType userType, SubscriptionType subscriptionType);
+
+    /**
+     * Cuenta usuarios públicos
+     */
+    long countPublicUsers();
 
     /**
      * Encuentra todos los usuarios activos (verificados) con paginación

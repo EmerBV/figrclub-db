@@ -154,6 +154,127 @@ public class UserController {
         }
     }
 
+    /**
+     * Endpoint PÚBLICO para listar usuarios regulares (reutiliza findRegularUsers)
+     * No requiere autenticación - ideal para mostrar comunidad pública
+     */
+    @GetMapping("/public")
+    @Operation(
+            summary = "Get public users",
+            description = "Get verified regular users (excludes admins) - PUBLIC endpoint"
+    )
+    public ResponseEntity<ApiResponse> getPublicUsers(
+            @Parameter(description = "Page number (0-based)")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size (max 50)")
+            @RequestParam(defaultValue = "20") int size,
+            @Parameter(description = "Sort by field")
+            @RequestParam(defaultValue = "firstName") String sortBy,
+            @Parameter(description = "Sort direction")
+            @RequestParam(defaultValue = "ASC") String sortDirection,
+            @Parameter(description = "Filter by user type")
+            @RequestParam(required = false) UserType userType,
+            @Parameter(description = "Filter by subscription type")
+            @RequestParam(required = false) SubscriptionType subscriptionType) {
+        try {
+            log.info("Public request for users: page={}, size={}, filters=[userType={}, subscription={}]",
+                    page, size, userType, subscriptionType);
+
+            // Limitar tamaño de página para evitar sobrecarga
+            size = Math.min(size, 50);
+
+            // Configurar paginación y ordenamiento
+            Sort.Direction direction = "DESC".equalsIgnoreCase(sortDirection)
+                    ? Sort.Direction.DESC : Sort.Direction.ASC;
+            Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+
+            // REUTILIZAR el método existente con filtros adicionales
+            Page<User> publicUsersPage;
+
+            if (userType == null && subscriptionType == null) {
+                // Sin filtros -> usar findRegularUsers existente filtrado por verificación
+                publicUsersPage = userService.findVerifiedRegularUsers(pageable);
+            } else {
+                // Con filtros -> usar el nuevo método con filtros
+                publicUsersPage = userService.findPublicUsers(pageable, userType, subscriptionType);
+            }
+
+            // Convertir a DTOs públicos (información limitada)
+            Page<UserDto> userDtoPage = publicUsersPage.map(user ->
+                    createPublicUserDto(userService.convertUserToDto(user))
+            );
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("users", userDtoPage.getContent());
+            response.put("currentPage", userDtoPage.getNumber());
+            response.put("totalItems", userDtoPage.getTotalElements());
+            response.put("totalPages", userDtoPage.getTotalPages());
+            response.put("pageSize", userDtoPage.getSize());
+            response.put("isFirst", userDtoPage.isFirst());
+            response.put("isLast", userDtoPage.isLast());
+            response.put("hasNext", userDtoPage.hasNext());
+            response.put("hasPrevious", userDtoPage.hasPrevious());
+
+            // Información adicional pública
+            response.put("filters", Map.of(
+                    "userType", userType != null ? userType.toString() : "ALL",
+                    "subscriptionType", subscriptionType != null ? subscriptionType.toString() : "ALL",
+                    "verified", true,
+                    "active", true,
+                    "excludesAdmins", true
+            ));
+
+            // Estadísticas públicas adicionales
+            response.put("publicStats", Map.of(
+                    "totalPublicUsers", userService.countPublicUsers(),
+                    "regularUsersCount", userService.countRegularUsers(),
+                    "verifiedUsersCount", userService.countVerifiedUsers()
+            ));
+
+            return ResponseEntity.ok(new ApiResponse("Public users retrieved successfully", response));
+
+        } catch (Exception e) {
+            log.error("Error retrieving public users", e);
+            return ResponseEntity.status(INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse("Error retrieving public users", null));
+        }
+    }
+
+    /**
+     * Crea un DTO con información limitada para uso público
+     * Reutiliza la conversión existente pero filtra campos sensibles
+     */
+    private UserDto createPublicUserDto(UserDto originalDto) {
+        UserDto publicDto = new UserDto();
+
+        // Información básica pública
+        publicDto.setId(originalDto.getId());
+        publicDto.setFirstName(originalDto.getFirstName());
+        publicDto.setLastName(originalDto.getLastName());
+        publicDto.setDisplayName(originalDto.getDisplayName());
+        publicDto.setUserType(originalDto.getUserType());
+        publicDto.setSubscriptionType(originalDto.getSubscriptionType());
+        publicDto.setCreatedAt(originalDto.getCreatedAt());
+
+        // Para vendedores profesionales, mostrar info de negocio
+        if (originalDto.getUserType() == UserType.PRO_SELLER) {
+            publicDto.setBusinessName(originalDto.getBusinessName());
+            publicDto.setBusinessDescription(originalDto.getBusinessDescription());
+            publicDto.setBusinessLogoUrl(originalDto.getBusinessLogoUrl());
+        }
+
+        // Información de ubicación si está disponible
+        publicDto.setCountry(originalDto.getCountry());
+        publicDto.setCity(originalDto.getCity());
+
+        // NO incluir información sensible:
+        // - email, phone, fiscalAddress, taxId
+        // - fechas de actualización internas
+        // - información de roles o permisos
+
+        return publicDto;
+    }
+
     @GetMapping("/search")
     @Operation(summary = "Search users", description = "Search users by various criteria")
     @SecurityRequirement(name = "bearerAuth")
@@ -371,8 +492,6 @@ public class UserController {
                     .body(new ApiResponse("Error upgrading to Pro Seller", null));
         }
     }
-
-    // ===== ENDPOINTS BLOQUEADOS (MODIFICACIÓN DE ROLES) =====
 
     // ===== ENDPOINTS DE CREACIÓN DE USUARIOS (SOLO ADMINS) =====
 

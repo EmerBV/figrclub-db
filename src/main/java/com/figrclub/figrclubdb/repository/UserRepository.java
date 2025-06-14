@@ -85,10 +85,47 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Page<User> findAdminUsers(Pageable pageable);
 
     /**
-     * Encuentra usuarios regulares (no admin)
+     * Busca usuarios regulares verificados y activos
+     * Reutiliza la lógica de findRegularUsers() con filtros adicionales
      */
-    @Query("SELECT u FROM User u WHERE u.role.name = 'ROLE_USER'")
-    Page<User> findRegularUsers(Pageable pageable);
+    @Query("""
+    SELECT u FROM User u 
+    WHERE u.role.name = 'ROLE_USER'
+    AND u.isEnabled = true 
+    AND u.emailVerifiedAt IS NOT NULL
+    ORDER BY u.createdAt DESC
+    """)
+    Page<User> findVerifiedRegularUsers(Pageable pageable);
+
+    /**
+     * Busca usuarios públicos - regulares verificados y activos con filtros opcionales
+     * Extiende findVerifiedRegularUsers() con filtros de tipo y suscripción
+     */
+    @Query("""
+    SELECT u FROM User u 
+    WHERE u.role.name = 'ROLE_USER'
+    AND u.isEnabled = true 
+    AND u.emailVerifiedAt IS NOT NULL
+    AND (:userType IS NULL OR u.userType = :userType)
+    AND (:subscriptionType IS NULL OR u.subscriptionType = :subscriptionType)
+    """)
+    Page<User> findPublicUsers(
+            @Param("userType") UserType userType,
+            @Param("subscriptionType") SubscriptionType subscriptionType,
+            Pageable pageable
+    );
+
+    /**
+     * Contar usuarios públicos para estadísticas
+     * Reutiliza la lógica de usuarios regulares con filtros de verificación
+     */
+    @Query("""
+    SELECT COUNT(u) FROM User u 
+    WHERE u.role.name = 'ROLE_USER'
+    AND u.isEnabled = true 
+    AND u.emailVerifiedAt IS NOT NULL
+    """)
+    long countPublicUsers();
 
     // ===== MÉTODOS POR TIPO DE USUARIO =====
 
